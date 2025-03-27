@@ -6,7 +6,7 @@ import shutil
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QListWidget, QMessageBox,
                              QComboBox, QLineEdit, QSplitter, QAction, QTreeView,
-                             QGroupBox, QFrame, QStyle, QDialog)
+                             QGroupBox, QFrame, QStyle, QDialog, QApplication)
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QKeySequence
 from PyQt5.QtCore import Qt, QDir
 
@@ -233,8 +233,17 @@ class YOLOLabelCreator(QMainWindow):
         self.auto_label_button.setIcon(self.style().standardIcon(QStyle.SP_CommandLink))
         self.auto_label_button.clicked.connect(self.auto_label_current)
         self.auto_label_button.setEnabled(False)
+
+        # 批量标注按钮
+        self.auto_label_all_button = QPushButton(tr("Auto Label All"))
+        self.auto_label_all_button.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+        self.auto_label_all_button.clicked.connect(self.auto_label_all)
+        self.auto_label_all_button.setEnabled(False)
+
+
         model_layout.addWidget(self.model_button)
         model_layout.addWidget(self.auto_label_button)
+        model_layout.addWidget(self.auto_label_all_button)
         
         self.model_label = QLabel(tr("No model selected"))
         self.model_label.setWordWrap(True)
@@ -685,7 +694,6 @@ class YOLOLabelCreator(QMainWindow):
             
             # 保存到项目目录和图片目录
             self._write_label_file(label_path, img_width, img_height)
-            self._save_to_image_directory(img_width, img_height)
             
             # 保存类别名称到classes.txt（项目目录）
             classes_path = os.path.join(os.path.dirname(label_path), "classes.txt")
@@ -727,14 +735,6 @@ class YOLOLabelCreator(QMainWindow):
                 f.write(line)
         self.update_data_yaml()
     
-    def _save_to_image_directory(self, img_width, img_height):
-        """在图片目录生成副本"""
-        if self.canvas.image_path:
-            image_dir = os.path.dirname(self.canvas.image_path)
-            base_name = os.path.splitext(os.path.basename(self.canvas.image_path))[0]
-            local_label_path = os.path.join(image_dir, f"{base_name}.txt")
-            self._write_label_file(local_label_path, img_width, img_height)
-
     # 添加模型选择方法
     def select_model(self):
         """选择YOLO模型文件"""
@@ -750,9 +750,11 @@ class YOLOLabelCreator(QMainWindow):
             # 尝试加载模型
             if self.yolo_predictor.load_model(model_path):
                 self.auto_label_button.setEnabled(True)
+                self.auto_label_all_button.setEnabled(True)
                 QMessageBox.information(self, tr("成功"), tr("模型加载成功"))
             else:
                 self.auto_label_button.setEnabled(False)
+                self.auto_label_all_button.setEnabled(False)
                 QMessageBox.warning(self, tr("错误"), tr("模型加载失败"))
 
     # 添加自动标注方法
@@ -804,6 +806,72 @@ class YOLOLabelCreator(QMainWindow):
         except Exception as e:
             logger.error(f"自动标注失败: {str(e)}")
             QMessageBox.warning(self, tr("错误"), tr(f"自动标注失败: {str(e)}"))
+
+    def auto_label_all(self):
+        """使用YOLO模型自动标注当前文件夹中的所有图像"""
+        if not self.current_folder or not self.image_files:
+            QMessageBox.warning(self, tr("警告"), tr("请先选择包含图像的文件夹"))
+            return
+            
+        if not hasattr(self, 'model_path') or not self.model_path or not os.path.exists(self.model_path):
+            QMessageBox.warning(self, tr("警告"), tr("请先选择有效的模型文件"))
+            return
+        
+        try:
+            # 创建进度对话框
+            from PyQt5.QtWidgets import QProgressDialog
+            progress = QProgressDialog(tr("正在处理图像..."), tr("取消"), 0, len(self.image_files), self)
+            progress.setWindowTitle(tr("批量自动标注"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setValue(0)
+            
+            # 保存当前图像索引，以便处理完成后恢复
+            original_index = self.current_image_index
+            
+            # 处理每张图像
+            processed_count = 0
+            for i, image_file in enumerate(self.image_files):
+                if progress.wasCanceled():
+                    break
+                    
+                image_path = os.path.join(self.current_folder, image_file)
+                progress.setLabelText(tr(f"正在处理 ({i+1}/{len(self.image_files)}): {image_file}"))
+                
+                # 加载图像
+                self.current_image_index = i
+                self.image_list.setCurrentRow(i)
+                self.load_image(image_path)
+                
+                # 执行预测
+                boxes = self.yolo_predictor.predict(image_path)
+                
+                if boxes:
+                    # 添加预测的边界框，保留现有标注
+                    self.canvas.boxes.extend(boxes)
+                    self.update_box_list()
+                    self.canvas.update()
+                    
+                    # 保存标注
+                    self.save_current()
+                    processed_count += 1
+                
+                # 更新进度
+                progress.setValue(i + 1)
+                QApplication.processEvents()  # 确保UI响应
+            
+            # 恢复到原始图像
+            self.current_image_index = original_index
+            self.image_list.setCurrentRow(original_index)
+            image_path = os.path.join(self.current_folder, self.image_files[original_index])
+            self.load_image(image_path)
+            
+            # 显示完成消息
+            self.statusBar().showMessage(tr(f"批量标注完成，成功处理 {processed_count} 张图像"), 5000)
+            
+        except Exception as e:
+            logger.error(f"批量自动标注失败: {str(e)}\n{traceback.format_exc()}")
+            QMessageBox.warning(self, tr("错误"), tr(f"批量自动标注失败: {str(e)}"))
+
 
     # 添加快捷键设置方法
     def setup_shortcuts(self):
@@ -884,6 +952,12 @@ class YOLOLabelCreator(QMainWindow):
         auto_label_action.setShortcut(auto_label_shortcut)
         auto_label_action.triggered.connect(self.auto_label_current)
         self.addAction(auto_label_action)
+        # 批量标注快捷键
+        auto_label_all_shortcut = QKeySequence(self.settings.get_shortcut('auto_label_all'))
+        auto_label_all_action = QAction(tr("批量自动标注"), self)
+        auto_label_all_action.setShortcut(auto_label_all_shortcut)
+        auto_label_all_action.triggered.connect(self.auto_label_all)
+        self.addAction(auto_label_all_action)
 
     def show_settings(self):
         """显示设置对话框"""

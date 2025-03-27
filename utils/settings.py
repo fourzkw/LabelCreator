@@ -15,7 +15,8 @@ DEFAULT_SHORTCUTS = {
     'reset_zoom': 'Ctrl+0',
     'open_directory': 'Ctrl+O',
     'exit': 'Ctrl+Q',
-    'auto_label': 'Ctrl+A'
+    'auto_label': 'Ctrl+A',
+    'auto_label_all': 'Ctrl+Shift+A'  # 添加批量标注的默认快捷键
 }
 
 class Settings:

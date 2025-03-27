@@ -10,6 +10,7 @@
         "reset_zoom": "Ctrl+0",
         "open_directory": "Ctrl+O",
         "exit": "Ctrl+Q",
-        "auto_label": "Ctrl+A"
+        "auto_label": "Ctrl+A",
+        "auto_label_all": "Ctrl+Shift+A"
     }
 }
