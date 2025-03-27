@@ -1,0 +1,15 @@
+{
+    "shortcuts": {
+        "save_current": "Ctrl+S",
+        "save_all": "Ctrl+Shift+S",
+        "prev_image": "Left",
+        "next_image": "Right",
+        "delete_box": "Delete",
+        "zoom_in": "Ctrl++",
+        "zoom_out": "Ctrl+-",
+        "reset_zoom": "Ctrl+0",
+        "open_directory": "Ctrl+O",
+        "exit": "Ctrl+Q",
+        "auto_label": "Ctrl+A"
+    }
+}
