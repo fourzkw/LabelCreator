@@ -9,13 +9,14 @@ class BoundingBox:
         y2 (int): 右下角y坐标（规范化前）
         class_id (int): 类别ID，默认为0
     """
-    def __init__(self, x1, y1, x2, y2, class_id=0):
+    def __init__(self, x1, y1, x2, y2, class_id=0, confidence=1.0):
         # 确保坐标顺序正确（左上角到右下角）
         self.x1 = min(x1, x2)
         self.y1 = min(y1, y2)
         self.x2 = max(x1, x2)
         self.y2 = max(y1, y2)
         self.class_id = class_id
+        self.confidence = confidence
     
     def to_yolo_format(self, img_width, img_height):
         """

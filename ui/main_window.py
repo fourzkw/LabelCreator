@@ -16,6 +16,8 @@ from i18n import tr
 from utils.yolo_predictor import YOLOPredictor
 from utils.settings import Settings
 from ui.settings_dialog import SettingsDialog  # Import SettingsDialog directly
+from ui.model_settings_dialog import ModelSettingsDialog
+from training.trainer_dialog import YoloTrainerDialog
 
 # 获取日志记录器
 logger = logging.getLogger('YOLOLabelCreator.MainWindow')
@@ -343,6 +345,22 @@ class YOLOLabelCreator(QMainWindow):
         preferences_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         preferences_action.triggered.connect(self.show_settings)
         settings_menu.addAction(preferences_action)
+
+        # 模型预测设置
+        model_settings_action = QAction(tr("模型预测设置"), self)
+        model_settings_action.setIcon(self.style().standardIcon(QStyle.SP_DesktopIcon))
+        model_settings_action.triggered.connect(self.open_model_settings)
+        settings_menu.addAction(model_settings_action)
+        
+        # 添加训练菜单
+        train_menu = menubar.addMenu(tr("训练"))
+        
+        # 添加YOLOv8训练器动作
+        train_yolo_action = QAction(tr("YOLOv8训练器"), self)
+        train_yolo_action.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        train_yolo_action.triggered.connect(self.open_yolo_trainer)
+        train_menu.addAction(train_yolo_action)
+        
         # 添加状态栏
         self.statusBar().showMessage(tr("Ready"))
 
@@ -966,3 +984,51 @@ class YOLOLabelCreator(QMainWindow):
             # 如果设置已保存，重新应用快捷键
             self.setup_shortcuts()
             self.statusBar().showMessage(tr("设置已更新"), 3000)
+
+    def open_yolo_trainer(self):
+            """打开YOLOv8训练器对话框"""
+            try:
+                trainer_dialog = YoloTrainerDialog(self)
+                trainer_dialog.exec_()
+            except Exception as e:
+                logger.error(f"打开训练器失败: {str(e)}")
+                QMessageBox.warning(self, tr("错误"), f"{tr('打开训练器失败')}: {str(e)}")
+
+    def open_model_settings(self):
+        """打开模型预测设置对话框"""
+        dialog = ModelSettingsDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            # 如果设置已保存，更新预测器的参数
+            from utils.config import Config
+            config = Config()
+            model_params = config.get_model_params()
+            
+            # 更新预测器参数
+            if self.yolo_predictor:
+                self.yolo_predictor.set_params(
+                    conf_threshold=model_params.get("confidence_threshold", 0.5),
+                    iou_threshold=model_params.get("iou_threshold", 0.45),
+                    max_detections=model_params.get("max_detections", 100),
+                    device=model_params.get("device", "cpu")
+                )
+                
+                # 如果模型路径已设置且不同于当前路径，尝试加载新模型
+                model_path = model_params.get("model_path", "")
+                if model_path and model_path != self.model_path and os.path.exists(model_path):
+                    if self.yolo_predictor.load_model(model_path):
+                        self.model_path = model_path
+                        self.model_label.setText(os.path.basename(model_path))
+                        self.auto_label_button.setEnabled(True)
+                        self.auto_label_all_button.setEnabled(True)
+                        self.statusBar().showMessage(tr("模型已更新"), 3000)
+                # 如果模型路径相同但设备改变，重新加载模型
+                elif model_path and model_path == self.model_path and os.path.exists(model_path):
+                    if self.yolo_predictor.load_model(model_path):
+                        self.statusBar().showMessage(tr("模型已在新设备上重新加载"), 3000)
+            
+            # 检查是否启用自动预测
+            if model_params.get("enable_auto_predict", False):
+                # 这里可以添加自动预测的逻辑
+                pass
+                
+            self.statusBar().showMessage(tr("模型设置已更新"), 3000)

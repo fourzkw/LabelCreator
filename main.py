@@ -2,11 +2,17 @@ import sys
 import os
 import traceback
 from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtCore import Qt
+
+# 训练模块
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # 导入自定义模块
 from ui.main_window import YOLOLabelCreator
 from utils.logger import setup_logger
+from utils.config import Config  # 导入配置模块
 from i18n import tr
+
 
 # 配置日志记录
 logger = setup_logger('YOLOLabelCreator', 'app.log')
@@ -31,7 +37,16 @@ if __name__ == "__main__":
         app.setApplicationName("YOLOLabelCreator")
         app.setOrganizationName("YOLOLabelCreator")
         
+        # 确保窗口样式正确
+        app.setStyle("Fusion")  # 使用Fusion样式，通常兼容性更好
+        
+        # 初始化配置
+        config = Config()
+        
         window = YOLOLabelCreator()
+        # 确保窗口属性设置正确
+        window.setAttribute(Qt.WA_DeleteOnClose)
+        window.setWindowFlags(window.windowFlags() | Qt.WindowMinMaxButtonsHint)
         window.show()
         logger.info("应用程序窗口已显示")
         exit_code = app.exec_()
