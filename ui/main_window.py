@@ -18,6 +18,8 @@ from utils.settings import Settings
 from ui.settings_dialog import SettingsDialog  # Import SettingsDialog directly
 from ui.model_settings_dialog import ModelSettingsDialog
 from training.trainer_dialog import YoloTrainerDialog
+from ui.dataset_split_dialog import DatasetSplitDialog
+from ui.class_manager_dialog import ClassManagerDialog
 
 # 获取日志记录器
 logger = logging.getLogger('YOLOLabelCreator.MainWindow')
@@ -187,7 +189,7 @@ class YOLOLabelCreator(QMainWindow):
         
         class_layout.addLayout(class_combo_layout)
         class_layout.addLayout(class_add_layout)
-        
+
         # Box list in a group box
         box_group = QGroupBox(tr("Bounding Boxes"))
         box_layout = QVBoxLayout(box_group)
@@ -242,10 +244,16 @@ class YOLOLabelCreator(QMainWindow):
         self.auto_label_all_button.clicked.connect(self.auto_label_all)
         self.auto_label_all_button.setEnabled(False)
 
+        # 数据集划分按钮
+        self.dataset_split_button = QPushButton(tr("数据集划分"))
+        self.dataset_split_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogListView))
+        self.dataset_split_button.clicked.connect(self.open_dataset_split)
+
 
         model_layout.addWidget(self.model_button)
         model_layout.addWidget(self.auto_label_button)
         model_layout.addWidget(self.auto_label_all_button)
+        model_layout.addWidget(self.dataset_split_button)
         
         self.model_label = QLabel(tr("No model selected"))
         self.model_label.setWordWrap(True)
@@ -341,16 +349,32 @@ class YOLOLabelCreator(QMainWindow):
         
         settings_menu = menubar.addMenu(tr("设置"))
         
+        # 首选项菜单项
         preferences_action = QAction(tr("首选项"), self)
         preferences_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         preferences_action.triggered.connect(self.show_settings)
         settings_menu.addAction(preferences_action)
+
+        # 类别管理菜单项
+        class_manager_action = QAction(tr("类别管理"), self)
+        class_manager_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogListView))
+        class_manager_action.triggered.connect(self.open_class_manager)
+        settings_menu.addAction(class_manager_action)
 
         # 模型预测设置
         model_settings_action = QAction(tr("模型预测设置"), self)
         model_settings_action.setIcon(self.style().standardIcon(QStyle.SP_DesktopIcon))
         model_settings_action.triggered.connect(self.open_model_settings)
         settings_menu.addAction(model_settings_action)
+        
+        # 添加工具菜单
+        tools_menu = menubar.addMenu(tr("工具"))
+        
+        # 添加数据集划分菜单项
+        dataset_split_action = QAction(tr("数据集划分"), self)
+        dataset_split_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        dataset_split_action.triggered.connect(self.open_dataset_split)
+        tools_menu.addAction(dataset_split_action)
         
         # 添加训练菜单
         train_menu = menubar.addMenu(tr("训练"))
@@ -1032,3 +1056,83 @@ class YOLOLabelCreator(QMainWindow):
                 pass
                 
             self.statusBar().showMessage(tr("模型设置已更新"), 3000)
+    def open_model_settings(self):
+        """打开模型预测设置对话框"""
+        dialog = ModelSettingsDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            # 如果设置已保存，更新预测器的参数
+            from utils.config import Config
+            config = Config()
+            model_params = config.get_model_params()
+            
+            # 更新预测器参数
+            if self.yolo_predictor:
+                self.yolo_predictor.set_params(
+                    conf_threshold=model_params.get("confidence_threshold", 0.5),
+                    iou_threshold=model_params.get("iou_threshold", 0.45),
+                    max_detections=model_params.get("max_detections", 100),
+                    device=model_params.get("device", "cpu")
+                )
+                
+                # 如果模型路径已设置且不同于当前路径，尝试加载新模型
+                model_path = model_params.get("model_path", "")
+                if model_path and model_path != self.model_path and os.path.exists(model_path):
+                    if self.yolo_predictor.load_model(model_path):
+                        self.model_path = model_path
+                        self.model_label.setText(os.path.basename(model_path))
+                        self.auto_label_button.setEnabled(True)
+                        self.auto_label_all_button.setEnabled(True)
+                        self.statusBar().showMessage(tr("模型已更新"), 3000)
+                # 如果模型路径相同但设备改变，重新加载模型
+                elif model_path and model_path == self.model_path and os.path.exists(model_path):
+                    if self.yolo_predictor.load_model(model_path):
+                        self.statusBar().showMessage(tr("模型已在新设备上重新加载"), 3000)
+            
+            # 检查是否启用自动预测
+            if model_params.get("enable_auto_predict", False):
+                # 这里可以添加自动预测的逻辑
+                pass
+                
+            self.statusBar().showMessage(tr("模型设置已更新"), 3000)
+            
+    def open_dataset_split(self):
+        """打开数据集划分对话框"""
+        try:
+            if not self.current_folder:
+                QMessageBox.warning(self, tr("警告"), tr("请先选择一个文件夹"))
+                return
+                
+            dialog = DatasetSplitDialog(self, self.current_folder)
+            dialog.exec_()
+        except Exception as e:
+            logger.error(f"打开数据集划分对话框失败: {str(e)}")
+            QMessageBox.warning(self, tr("错误"), f"{tr('打开数据集划分对话框失败')}: {str(e)}")
+
+    def open_class_manager(self):
+        """打开类别管理对话框"""
+        try:
+            # 确定data.yaml的路径
+            data_yaml_path = None
+            if self.current_folder:
+                data_yaml_path = os.path.join(self.current_folder, 'data.yaml')
+            
+            dialog = ClassManagerDialog(self.classes, data_yaml_path, self)
+            if dialog.exec_() == QDialog.Accepted:
+                # 获取修改后的类别列表
+                new_classes = dialog.get_classes()
+                
+                # 检查是否有变化
+                if dialog.has_changes():
+                    # 更新类别列表
+                    self.classes = new_classes
+                    self.update_class_combo()
+                    
+                    # 如果当前有图像加载，可能需要更新标注
+                    if self.canvas.pixmap:
+                        # 更新类别下拉框
+                        self.update_box_list()
+                    
+                    self.statusBar().showMessage(tr("类别已更新"), 3000)
+        except Exception as e:
+            logger.error(f"打开类别管理对话框失败: {str(e)}")
+            QMessageBox.warning(self, tr("错误"), tr(f"打开类别管理对话框失败: {str(e)}"))
