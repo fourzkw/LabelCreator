@@ -590,45 +590,40 @@ class ImageCanvas(QWidget):
         # 获取缩放后的鼠标位置
         pos = self.get_scaled_pos(event.pos())
         
-        # 特征点编辑模式
+        # 特征点编辑模式下的移动处理
         if self.keypoint_edit_mode:
             # 如果正在移动特征点
             if self.moving_keypoint and self.moving_keypoint_box_index >= 0 and self.moving_keypoint_index >= 0:
-                box = self.boxes[self.moving_keypoint_box_index]
                 # 更新特征点位置
-                if box.has_keypoints() and self.moving_keypoint_index < len(box.keypoints):
-                    # 确保特征点在边界框内
-                    x = max(box.x1, min(pos.x(), box.x2))
-                    y = max(box.y1, min(pos.y(), box.y2))
+                box = self.boxes[self.moving_keypoint_box_index]
+                if box.has_keypoints():
+                    # 确保特征点位置在图像范围内
+                    x = max(0, min(pos.x(), self.pixmap.width()))
+                    y = max(0, min(pos.y(), self.pixmap.height()))
+                    
+                    # 更新特征点坐标
                     box.keypoints[self.moving_keypoint_index] = [x, y]
-                    self.update()
+                    self.update()  # 重绘画布
                 return
             
-            # 检查鼠标是否悬停在特征点上，更新光标
-            cursor_set = False
+            # 鼠标悬停在特征点上时改变光标
+            cursor_changed = False
             for box in self.boxes:
                 if box.has_keypoints():
                     for kp in box.keypoints:
                         kp_x, kp_y = kp
                         if abs(kp_x - pos.x()) <= self.keypoint_radius * 2 and abs(kp_y - pos.y()) <= self.keypoint_radius * 2:
                             self.setCursor(Qt.OpenHandCursor)  # 设置为手形光标
-                            cursor_set = True
+                            cursor_changed = True
                             break
-                if cursor_set:
+                if cursor_changed:
                     break
             
-            if not cursor_set:
-                # 如果有选中的边界框，且鼠标在边界框内，显示十字光标
-                if self.selected_box_index >= 0 and self.selected_box_index < len(self.boxes):
-                    box = self.boxes[self.selected_box_index]
-                    if box.contains_point(pos.x(), pos.y()):
-                        self.setCursor(Qt.CrossCursor)
-                    else:
-                        self.setCursor(Qt.ArrowCursor)
-                else:
-                    self.setCursor(Qt.ArrowCursor)
+            if not cursor_changed:
+                self.setCursor(Qt.CrossCursor)  # 恢复十字光标
+            
             return
-        
+            
         # 非特征点编辑模式的处理逻辑
         x, y = self.get_image_position(event.pos())
         if x is None or y is None:
@@ -699,22 +694,99 @@ class ImageCanvas(QWidget):
             self.update()
     
     def mouseReleaseEvent(self, event):
+        """处理鼠标释放事件"""
+        if not self.pixmap:
+            return
+            
+        # 特征点编辑模式下的释放处理
+        if self.keypoint_edit_mode:
+            if event.button() == Qt.LeftButton and self.moving_keypoint:
+                # 停止移动特征点
+                self.moving_keypoint = False
+                self.setCursor(Qt.CrossCursor)  # 恢复十字光标
+                
+                # 如果有修改，更新界面
+                self.update()
+            return
+            
+        # 非特征点编辑模式的处理逻辑
+        x, y = self.get_image_position(event.pos())
+        if x is None or y is None:
+            self.setCursor(Qt.ArrowCursor)
+            return
+        
         if event.button() == Qt.LeftButton:
-            # 如果是编辑现有边界框
-            if self.edit_mode and self.selected_box_index >= 0:
+            # 处理边界框编辑
+            if self.edit_mode and self.selected_box_index >= 0 and self.last_cursor_pos:
+                box = self.boxes[self.selected_box_index]
+                dx = x - self.last_cursor_pos[0]
+                dy = y - self.last_cursor_pos[1]
+                
+                # 获取图像边界
+                img_width = self.pixmap.width()
+                img_height = self.pixmap.height()
+                
+                if self.edit_mode == 'move':
+                    # 移动整个边界框
+                    new_x1 = max(0, min(box.x1 + dx, img_width - 5))
+                    new_y1 = max(0, min(box.y1 + dy, img_height - 5))
+                    new_x2 = max(5, min(box.x2 + dx, img_width))
+                    new_y2 = max(5, min(box.y2 + dy, img_height))
+                    
+                    # 确保边界框不会移出图像
+                    if new_x1 < new_x2 - 5 and new_y1 < new_y2 - 5:
+                        box.x1 = new_x1
+                        box.y1 = new_y1
+                        box.x2 = new_x2
+                        box.y2 = new_y2
+                    
+                elif self.edit_mode == 'resize-corner':
+                    # 调整角点位置
+                    if self.edit_handle == 'top-left':
+                        box.x1 = max(0, min(box.x1 + dx, box.x2 - 5))
+                        box.y1 = max(0, min(box.y1 + dy, box.y2 - 5))
+                    elif self.edit_handle == 'top-right':
+                        box.x2 = max(box.x1 + 5, min(box.x2 + dx, img_width))
+                        box.y1 = max(0, min(box.y1 + dy, box.y2 - 5))
+                    elif self.edit_handle == 'bottom-left':
+                        box.x1 = max(0, min(box.x1 + dx, box.x2 - 5))
+                        box.y2 = max(box.y1 + 5, min(box.y2 + dy, img_height))
+                    elif self.edit_handle == 'bottom-right':
+                        box.x2 = max(box.x1 + 5, min(box.x2 + dx, img_width))
+                        box.y2 = max(box.y1 + 5, min(box.y2 + dy, img_height))
+                    
+                elif self.edit_mode == 'resize-edge':
+                    # 调整边缘位置
+                    if self.edit_handle == 'left':
+                        box.x1 = max(0, min(box.x1 + dx, box.x2 - 5))
+                    elif self.edit_handle == 'right':
+                        box.x2 = max(box.x1 + 5, min(box.x2 + dx, img_width))
+                    elif self.edit_handle == 'top':
+                        box.y1 = max(0, min(box.y1 + dy, box.y2 - 5))
+                    elif self.edit_handle == 'bottom':
+                        box.y2 = max(box.y1 + 5, min(box.y2 + dy, img_height))
+                
+                # 完成编辑后清除编辑状态
                 self.edit_mode = None
                 self.edit_handle = None
                 self.last_cursor_pos = None
                 self.parent.save_current()  # 保存修改
                 
-            # 如果是创建新边界框
-            elif self.current_box:
-                # Only add box if it has some minimum size
+            # 处理新边界框创建
+            elif self.start_point and self.current_box:
+                # 限制在图像边界内
+                x = max(0, min(x, self.pixmap.width()))
+                y = max(0, min(y, self.pixmap.height()))
+                
+                self.current_box.x2 = x
+                self.current_box.y2 = y
+                
+                # 只有当边界框达到最小尺寸时才添加
                 width = abs(self.current_box.x2 - self.current_box.x1)
                 height = abs(self.current_box.y2 - self.current_box.y1)
                 
                 box_added = False
-                if width > 5 and height > 5:  # Minimum size threshold
+                if width > 5 and height > 5:  # 最小尺寸阈值
                     self.boxes.append(self.current_box)
                     self.parent.update_box_list()
                     box_added = True

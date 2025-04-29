@@ -1,3 +1,5 @@
+import numpy as np
+
 class BoundingBox:
     """边界框类，用于存储和操作边界框数据"""
     
@@ -98,6 +100,30 @@ class BoundingBox:
             keypoints: numpy数组，格式为 [[x1, y1], [x2, y2], ...]
         """
         self.keypoints = keypoints
+
+    def add_keypoint(self, x, y):
+        """
+        添加一个新的特征点到边界框
+        
+        Args:
+            x (float): 特征点的 x 坐标
+            y (float): 特征点的 y 坐标
+            
+        Returns:
+            bool: 是否成功添加特征点
+        """
+        # 确保坐标在边界框内
+        if not (self.x1 <= x <= self.x2 and self.y1 <= y <= self.y2):
+            return False
+            
+        # 如果特征点列表不存在，创建一个新的
+        if not hasattr(self, 'keypoints') or self.keypoints is None:
+            self.keypoints = np.array([[x, y]])
+        else:
+            # 添加新的特征点
+            self.keypoints = np.append(self.keypoints, [[x, y]], axis=0)
+            
+        return True
         
     def has_keypoints(self):
         """检查是否有特征点数据"""
