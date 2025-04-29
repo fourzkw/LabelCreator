@@ -6,7 +6,8 @@ import shutil
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QListWidget, QMessageBox,
                              QComboBox, QLineEdit, QSplitter, QAction, QTreeView,
-                             QGroupBox, QFrame, QStyle, QDialog, QApplication)
+                             QGroupBox, QFrame, QStyle, QDialog, QApplication, QShortcut,
+                             QScrollArea)
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QKeySequence
 from PyQt5.QtCore import Qt, QDir
 
@@ -134,10 +135,10 @@ class YOLOLabelCreator(QMainWindow):
         main_layout.setSpacing(10)
         
         # Create left panel for controls
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        self.left_panel = QWidget()
+        self.left_layout = QVBoxLayout(self.left_panel)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(8)
         
         # Directory selection with icon
         dir_layout = QHBoxLayout()
@@ -213,7 +214,7 @@ class YOLOLabelCreator(QMainWindow):
         nav_layout.addWidget(prev_button)
         nav_layout.addWidget(next_button)
         
-        # Save buttons with icons
+        # 保存按钮
         save_group = QGroupBox(tr("Save Options"))
         save_layout = QHBoxLayout(save_group)
         save_button = QPushButton(tr("Save Current"))
@@ -230,9 +231,6 @@ class YOLOLabelCreator(QMainWindow):
         auto_layout = QVBoxLayout(auto_group)
         
         model_layout = QHBoxLayout()
-        self.model_button = QPushButton(tr("Select Model"))
-        self.model_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
-        self.model_button.clicked.connect(self.select_model)
         self.auto_label_button = QPushButton(tr("Auto Label"))
         self.auto_label_button.setIcon(self.style().standardIcon(QStyle.SP_CommandLink))
         self.auto_label_button.clicked.connect(self.auto_label_current)
@@ -244,15 +242,21 @@ class YOLOLabelCreator(QMainWindow):
         self.auto_label_all_button.clicked.connect(self.auto_label_all)
         self.auto_label_all_button.setEnabled(False)
 
+        # 特征点编辑按钮
+        self.keypoint_edit_button = QPushButton(tr("特征点编辑"))
+        self.keypoint_edit_button.setIcon(self.style().standardIcon(QStyle.SP_ToolBarHorizontalExtensionButton))
+        self.keypoint_edit_button.setCheckable(True)
+        self.keypoint_edit_button.clicked.connect(self.toggle_keypoint_mode)
+
         # 数据集划分按钮
         self.dataset_split_button = QPushButton(tr("数据集划分"))
         self.dataset_split_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogListView))
         self.dataset_split_button.clicked.connect(self.open_dataset_split)
 
 
-        model_layout.addWidget(self.model_button)
         model_layout.addWidget(self.auto_label_button)
         model_layout.addWidget(self.auto_label_all_button)
+        model_layout.addWidget(self.keypoint_edit_button)
         model_layout.addWidget(self.dataset_split_button)
         
         self.model_label = QLabel(tr("No model selected"))
@@ -268,16 +272,16 @@ class YOLOLabelCreator(QMainWindow):
         self.label_path_display.setStyleSheet("color: #666; font-size: 9pt;")
         
         # Add widgets to left layout
-        left_layout.addLayout(dir_layout)
-        left_layout.addWidget(folder_group)
-        left_layout.addWidget(image_group)
-        left_layout.addWidget(class_group)
-        left_layout.addWidget(box_group)
-        left_layout.addWidget(nav_group)
-        left_layout.addWidget(save_group)
-        left_layout.addWidget(auto_group)
-        left_layout.addWidget(self.label_path_display)
-        left_layout.addStretch(1)  # 添加弹性空间
+        self.left_layout.addLayout(dir_layout)
+        self.left_layout.addWidget(folder_group)
+        self.left_layout.addWidget(image_group)
+        self.left_layout.addWidget(class_group)
+        self.left_layout.addWidget(box_group)
+        self.left_layout.addWidget(nav_group)
+        self.left_layout.addWidget(save_group)
+        self.left_layout.addWidget(auto_group)
+        self.left_layout.addWidget(self.label_path_display)
+        self.left_layout.addStretch(1)  # 添加弹性空间
 
         # Create right panel for image canvas
         right_panel = QWidget()
@@ -312,9 +316,16 @@ class YOLOLabelCreator(QMainWindow):
         right_layout.addWidget(canvas_frame, 1)  # 让画布占据大部分空间
         right_layout.addLayout(zoom_layout)
         
+        # Create scroll area for left panel
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(self.left_panel)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
         # Add panels to main layout
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left_panel)
+        splitter.addWidget(self.scroll_area)
         splitter.addWidget(right_panel)
         splitter.setSizes([300, 900])  # Set initial sizes
         
@@ -773,7 +784,19 @@ class YOLOLabelCreator(QMainWindow):
         with open(path, 'w', encoding='utf-8') as f:
             for box in self.canvas.boxes:
                 yolo_box = box.to_yolo_format(img_width, img_height)
-                line = f"{yolo_box[0]} {yolo_box[1]:.6f} {yolo_box[2]:.6f} {yolo_box[3]:.6f} {yolo_box[4]:.6f}\n"
+                line = f"{yolo_box[0]} {yolo_box[1]:.6f} {yolo_box[2]:.6f} {yolo_box[3]:.6f} {yolo_box[4]:.6f}"
+                
+                # 检查是否有特征点数据，如果有则添加到标签行
+                if box.has_keypoints():
+                    keypoints = box.keypoints
+                    # 将特征点坐标转换为相对坐标并添加到行末
+                    for kp in keypoints:
+                        # 归一化坐标到[0,1]范围
+                        kp_x_norm = kp[0] / img_width
+                        kp_y_norm = kp[1] / img_height
+                        line += f" {kp_x_norm:.6f} {kp_y_norm:.6f}"
+                
+                line += "\n"
                 f.write(line)
         self.update_data_yaml()
     
@@ -919,87 +942,56 @@ class YOLOLabelCreator(QMainWindow):
     def setup_shortcuts(self):
         """设置应用程序快捷键"""
         # 保存当前
-        save_shortcut = QKeySequence(self.settings.get_shortcut('save_current'))
-        save_action = QAction(tr("保存当前"), self)
-        save_action.setShortcut(save_shortcut)
-        save_action.triggered.connect(self.save_current)
-        self.addAction(save_action)
+        save_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('save_current')), self)
+        save_shortcut.activated.connect(self.save_current)
         
         # 保存全部
-        save_all_shortcut = QKeySequence(self.settings.get_shortcut('save_all'))
-        save_all_action = QAction(tr("保存全部"), self)
-        save_all_action.setShortcut(save_all_shortcut)
-        save_all_action.triggered.connect(self.save_all)
-        self.addAction(save_all_action)
+        save_all_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('save_all')), self)
+        save_all_shortcut.activated.connect(self.save_all)
         
         # 上一张图像
-        prev_shortcut = QKeySequence(self.settings.get_shortcut('prev_image'))
-        prev_action = QAction(tr("上一张图像"), self)
-        prev_action.setShortcut(prev_shortcut)
-        prev_action.triggered.connect(self.prev_image)
-        self.addAction(prev_action)
+        prev_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('prev_image')), self)
+        prev_shortcut.activated.connect(self.prev_image)
         
         # 下一张图像
-        next_shortcut = QKeySequence(self.settings.get_shortcut('next_image'))
-        next_action = QAction(tr("下一张图像"), self)
-        next_action.setShortcut(next_shortcut)
-        next_action.triggered.connect(self.next_image)
-        self.addAction(next_action)
+        next_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('next_image')), self)
+        next_shortcut.activated.connect(self.next_image)
         
         # 删除选中框
-        delete_shortcut = QKeySequence(self.settings.get_shortcut('delete_box'))
-        delete_action = QAction(tr("删除选中框"), self)
-        delete_action.setShortcut(delete_shortcut)
-        delete_action.triggered.connect(self.delete_selected_box)
-        self.addAction(delete_action)
+        delete_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('delete_box')), self)
+        delete_shortcut.activated.connect(self.delete_selected_box)
         
         # 放大
-        zoom_in_shortcut = QKeySequence(self.settings.get_shortcut('zoom_in'))
-        zoom_in_action = QAction(tr("放大"), self)
-        zoom_in_action.setShortcut(zoom_in_shortcut)
-        zoom_in_action.triggered.connect(self.canvas.zoom_in)
-        self.addAction(zoom_in_action)
+        zoom_in_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('zoom_in')), self)
+        zoom_in_shortcut.activated.connect(self.canvas.zoom_in)
         
         # 缩小
-        zoom_out_shortcut = QKeySequence(self.settings.get_shortcut('zoom_out'))
-        zoom_out_action = QAction(tr("缩小"), self)
-        zoom_out_action.setShortcut(zoom_out_shortcut)
-        zoom_out_action.triggered.connect(self.canvas.zoom_out)
-        self.addAction(zoom_out_action)
+        zoom_out_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('zoom_out')), self)
+        zoom_out_shortcut.activated.connect(self.canvas.zoom_out)
         
         # 重置缩放
-        reset_zoom_shortcut = QKeySequence(self.settings.get_shortcut('reset_zoom'))
-        reset_zoom_action = QAction(tr("重置缩放"), self)
-        reset_zoom_action.setShortcut(reset_zoom_shortcut)
-        reset_zoom_action.triggered.connect(self.canvas.reset_zoom)
-        self.addAction(reset_zoom_action)
+        reset_zoom_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('reset_zoom')), self)
+        reset_zoom_shortcut.activated.connect(self.canvas.reset_zoom)
         
         # 打开目录
-        open_dir_shortcut = QKeySequence(self.settings.get_shortcut('open_directory'))
-        open_dir_action = QAction(tr("打开目录"), self)
-        open_dir_action.setShortcut(open_dir_shortcut)
-        open_dir_action.triggered.connect(self.select_directory)
-        self.addAction(open_dir_action)
+        open_dir_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('open_directory')), self)
+        open_dir_shortcut.activated.connect(self.select_directory)
         
         # 退出
-        exit_shortcut = QKeySequence(self.settings.get_shortcut('exit'))
-        exit_action = QAction(tr("退出"), self)
-        exit_action.setShortcut(exit_shortcut)
-        exit_action.triggered.connect(self.close)
-        self.addAction(exit_action)
+        exit_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('exit')), self)
+        exit_shortcut.activated.connect(self.close)
         
         # 自动标注
-        auto_label_shortcut = QKeySequence(self.settings.get_shortcut('auto_label'))
-        auto_label_action = QAction(tr("自动标注"), self)
-        auto_label_action.setShortcut(auto_label_shortcut)
-        auto_label_action.triggered.connect(self.auto_label_current)
-        self.addAction(auto_label_action)
+        auto_label_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('auto_label')), self)
+        auto_label_shortcut.activated.connect(self.auto_label_current)
+        
         # 批量标注快捷键
-        auto_label_all_shortcut = QKeySequence(self.settings.get_shortcut('auto_label_all'))
-        auto_label_all_action = QAction(tr("批量自动标注"), self)
-        auto_label_all_action.setShortcut(auto_label_all_shortcut)
-        auto_label_all_action.triggered.connect(self.auto_label_all)
-        self.addAction(auto_label_all_action)
+        auto_label_all_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('auto_label_all')), self)
+        auto_label_all_shortcut.activated.connect(self.auto_label_all)
+
+        # 特征点编辑模式快捷键
+        keypoint_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('toggle_keypoint_mode')), self)
+        keypoint_shortcut.activated.connect(self.toggle_keypoint_mode)
 
     def show_settings(self):
         """显示设置对话框"""
@@ -1048,45 +1040,7 @@ class YOLOLabelCreator(QMainWindow):
                 # 如果模型路径相同但设备改变，重新加载模型
                 elif model_path and model_path == self.model_path and os.path.exists(model_path):
                     if self.yolo_predictor.load_model(model_path):
-                        self.statusBar().showMessage(tr("模型已在新设备上重新加载"), 3000)
-            
-            # 检查是否启用自动预测
-            if model_params.get("enable_auto_predict", False):
-                # 这里可以添加自动预测的逻辑
-                pass
-                
-            self.statusBar().showMessage(tr("模型设置已更新"), 3000)
-    def open_model_settings(self):
-        """打开模型预测设置对话框"""
-        dialog = ModelSettingsDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            # 如果设置已保存，更新预测器的参数
-            from utils.config import Config
-            config = Config()
-            model_params = config.get_model_params()
-            
-            # 更新预测器参数
-            if self.yolo_predictor:
-                self.yolo_predictor.set_params(
-                    conf_threshold=model_params.get("confidence_threshold", 0.5),
-                    iou_threshold=model_params.get("iou_threshold", 0.45),
-                    max_detections=model_params.get("max_detections", 100),
-                    device=model_params.get("device", "cpu")
-                )
-                
-                # 如果模型路径已设置且不同于当前路径，尝试加载新模型
-                model_path = model_params.get("model_path", "")
-                if model_path and model_path != self.model_path and os.path.exists(model_path):
-                    if self.yolo_predictor.load_model(model_path):
-                        self.model_path = model_path
-                        self.model_label.setText(os.path.basename(model_path))
-                        self.auto_label_button.setEnabled(True)
-                        self.auto_label_all_button.setEnabled(True)
-                        self.statusBar().showMessage(tr("模型已更新"), 3000)
-                # 如果模型路径相同但设备改变，重新加载模型
-                elif model_path and model_path == self.model_path and os.path.exists(model_path):
-                    if self.yolo_predictor.load_model(model_path):
-                        self.statusBar().showMessage(tr("模型已在新设备上重新加载"), 3000)
+                        self.statusBar().showMessage(tr("模型在新设备上重新加载"), 3000)
             
             # 检查是否启用自动预测
             if model_params.get("enable_auto_predict", False):
@@ -1136,3 +1090,24 @@ class YOLOLabelCreator(QMainWindow):
         except Exception as e:
             logger.error(f"打开类别管理对话框失败: {str(e)}")
             QMessageBox.warning(self, tr("错误"), tr(f"打开类别管理对话框失败: {str(e)}"))
+
+    def toggle_keypoint_mode(self):
+        """切换特征点编辑模式"""
+        is_checked = self.keypoint_edit_button.isChecked()
+        
+        # 保存当前窗口大小
+        current_size = self.size()
+        
+        # 切换特征点编辑模式
+        self.canvas.toggle_keypoint_mode(is_checked)
+        
+        # 更新按钮文本
+        if is_checked:
+            self.keypoint_edit_button.setText(tr("退出特征点编辑"))
+            self.statusBar().showMessage(tr("特征点编辑模式：点击边界框内部添加特征点，双击特征点删除"))
+        else:
+            self.keypoint_edit_button.setText(tr("特征点编辑"))
+            self.statusBar().showMessage(tr("Ready"))
+            
+        # 确保窗口大小不变
+        self.resize(current_size)

@@ -28,5 +28,5 @@
     "workers": 12,
     "device": "0",
     "cos_lr": true,
-    "cache": true
+    "cache": false
 }

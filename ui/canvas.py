@@ -1,8 +1,9 @@
 import os
 import traceback
 import logging
+import numpy as np
 from PyQt5.QtWidgets import QWidget, QMessageBox
-from PyQt5.QtGui import QPainter, QPen, QColor, QPixmap, QCursor
+from PyQt5.QtGui import QPainter, QPen, QColor, QPixmap, QCursor, QFont, QBrush
 from PyQt5.QtCore import Qt, QPoint
 
 from models.bounding_box import BoundingBox
@@ -51,6 +52,15 @@ class ImageCanvas(QWidget):
             border: 1px solid #cccccc;
         """)
 
+        # 添加特征点编辑相关属性
+        self.keypoint_edit_mode = False  # 特征点编辑模式标志
+        self.current_keypoint = None  # 当前正在编辑的特征点
+        self.keypoint_radius = 3  # 特征点半径
+        
+        # 添加特征点移动相关属性
+        self.moving_keypoint = False  # 是否正在移动特征点
+        self.moving_keypoint_box_index = -1  # 正在移动特征点所属的边界框索引
+        self.moving_keypoint_index = -1  # 正在移动的特征点索引
     def load_image(self, image_path):
         """
         安全加载图像及关联标注文件，确保异常情况下不丢失已有数据
@@ -105,10 +115,10 @@ class ImageCanvas(QWidget):
 
                             try:
                                 parts = list(map(float, line.split()))
-                                if len(parts) != 5:
+                                if len(parts) < 5:  # 至少需要5个值（类别ID和边界框坐标）
                                     raise ValueError("无效的字段数量")
 
-                                class_id, x_center, y_center, width, height = parts
+                                class_id, x_center, y_center, width, height = parts[:5]
                                 class_id = int(class_id)
 
                                 # 验证类别ID有效性
@@ -136,7 +146,28 @@ class ImageCanvas(QWidget):
                                 x2 = max(0, min(x2, img_w))
                                 y2 = max(0, min(y2, img_h))
 
-                                new_boxes.append(BoundingBox(x1, y1, x2, y2, class_id))
+                                bbox = BoundingBox(x1, y1, x2, y2, class_id)
+                                
+                                # 检查是否有特征点数据（每个特征点有x,y两个值）
+                                if len(parts) > 5 and (len(parts) - 5) % 2 == 0:
+                                    keypoints_count = (len(parts) - 5) // 2
+                                    keypoints = []
+                                    
+                                    for i in range(keypoints_count):
+                                        kp_x = parts[5 + i*2]
+                                        kp_y = parts[5 + i*2 + 1]
+                                        
+                                        # 验证特征点坐标范围
+                                        if 0 <= kp_x <= 1 and 0 <= kp_y <= 1:
+                                            # 转换为像素坐标
+                                            kp_x_px = int(kp_x * img_w)
+                                            kp_y_px = int(kp_y * img_h)
+                                            keypoints.append([kp_x_px, kp_y_px])
+                                    
+                                    if keypoints:
+                                        bbox.set_keypoints(np.array(keypoints))
+                                
+                                new_boxes.append(bbox)
                                 
                             except Exception as e:
                                 logger.error(f"标注文件解析错误 ({label_path} 第{line_number}行): {str(e)}")
@@ -207,35 +238,87 @@ class ImageCanvas(QWidget):
                                               Qt.KeepAspectRatio)
             
             # Center the image
-            x = (self.width() - scaled_pixmap.width()) // 2
-            y = (self.height() - scaled_pixmap.height()) // 2
+            x_offset = (self.width() - scaled_pixmap.width()) // 2
+            y_offset = (self.height() - scaled_pixmap.height()) // 2
             
             # 绘制图像阴影
             shadow_offset = 5
             painter.fillRect(
-                x + shadow_offset, 
-                y + shadow_offset, 
+                x_offset + shadow_offset, 
+                y_offset + shadow_offset, 
                 scaled_pixmap.width(), 
                 scaled_pixmap.height(), 
                 QColor(0, 0, 0, 30)
             )
             
             # Draw the image
-            painter.drawPixmap(x, y, scaled_pixmap)
+            painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
             
             # 绘制图像边框
             painter.setPen(QPen(QColor(180, 180, 180), 1))
-            painter.drawRect(x, y, scaled_pixmap.width(), scaled_pixmap.height())
+            painter.drawRect(x_offset, y_offset, scaled_pixmap.width(), scaled_pixmap.height())
             
-            # Draw existing bounding boxes
+            # 绘制所有边界框
             for i, box in enumerate(self.boxes):
                 # 选中的边界框使用不同的样式
                 is_selected = (i == self.selected_box_index)
-                self.draw_box(painter, box, x, y, scaled_pixmap.width(), scaled_pixmap.height(), is_selected)
+                self.draw_box(painter, box, x_offset, y_offset, scaled_pixmap.width(), scaled_pixmap.height(), is_selected)
+
+                # 绘制特征点（如果有）
+                if box.has_keypoints():
+                    painter.save()  # 保存当前绘图状态
+                    keypoints = box.get_keypoints()
+                    # 设置特征点绘制样式
+                    painter.setPen(QPen(QColor(255, 0, 255), 2))
+                    painter.setBrush(QBrush(QColor(255, 0, 255, 180)))
+                    
+                    # 获取原始图像尺寸
+                    orig_width = self.pixmap.width()
+                    orig_height = self.pixmap.height()
+                    
+                    # 计算缩放比例
+                    scale_x = scaled_pixmap.width() / orig_width
+                    scale_y = scaled_pixmap.height() / orig_height
+                    
+                    # 设置特征点编号的字体
+                    font = QFont()
+                    font.setPointSize(8)
+                    font.setBold(True)
+                    painter.setFont(font)
+                    
+                    # 计算特征点在画布上的位置
+                    for kp_idx, kp in enumerate(keypoints):
+                        # 特征点数据只有 x, y 两个值
+                        kp_x, kp_y = kp
+                            
+                        # 应用与边界框相同的缩放和偏移逻辑
+                        kp_x = x_offset + kp_x * scale_x
+                        kp_y = y_offset + kp_y * scale_y
+                        
+                        # 绘制特征点（小圆点）
+                        point_radius = 3
+                        painter.drawEllipse(QPoint(int(kp_x), int(kp_y)), point_radius, point_radius)
+                        
+                        # 绘制特征点编号
+                        # 设置白色背景以增强可读性
+                        text = str(kp_idx)
+                        text_rect = painter.fontMetrics().boundingRect(text)
+                        text_x = int(kp_x) + point_radius + 2
+                        text_y = int(kp_y)
+                        
+                        # 绘制文本背景
+                        bg_rect = text_rect.adjusted(-2, -2, 2, 2)
+                        bg_rect.moveCenter(QPoint(int(text_x + text_rect.width()/2), int(text_y)))
+                        painter.fillRect(bg_rect, QColor(255, 255, 255, 200))
+                        
+                        # 绘制编号文本
+                        painter.drawText(int(text_x), int(text_y + text_rect.height()/2), text)
+                    
+                    painter.restore()  # 恢复绘图状态
             
             # Draw the box being created
             if self.current_box:
-                self.draw_box(painter, self.current_box, x, y, scaled_pixmap.width(), scaled_pixmap.height())
+                self.draw_box(painter, self.current_box, x_offset, y_offset, scaled_pixmap.width(), scaled_pixmap.height())
     
     def draw_box(self, painter, box, offset_x, offset_y, img_width, img_height, is_selected=False):
         # Get original image dimensions
@@ -308,6 +391,28 @@ class ImageCanvas(QWidget):
         class_name = self.parent.get_class_name(box.class_id)
         painter.drawText(int(x1), int(y1) - 5, f"{class_name} (ID: {box.class_id})")
     
+    def get_scaled_pos(self, pos):
+        """将QPoint窗口坐标转换为考虑缩放因子的图像坐标"""
+        if not self.pixmap:
+            return QPoint(0, 0)
+            
+        scaled_pixmap = self.pixmap.scaled(int(self.width() * self.scale_factor), 
+                                          int(self.height() * self.scale_factor),
+                                          Qt.KeepAspectRatio)
+        offset_x = (self.width() - scaled_pixmap.width()) // 2
+        offset_y = (self.height() - scaled_pixmap.height()) // 2
+        
+        # 转换为原始图像坐标
+        orig_width = self.pixmap.width()
+        orig_height = self.pixmap.height()
+        scale_x = orig_width / scaled_pixmap.width()
+        scale_y = orig_height / scaled_pixmap.height()
+        
+        x = (pos.x() - offset_x) * scale_x
+        y = (pos.y() - offset_y) * scale_y
+        
+        return QPoint(int(x), int(y))
+    
     def get_image_coordinates(self, event_x, event_y):
         """将窗口坐标转换为原始图像坐标"""
         if not self.pixmap:
@@ -334,6 +439,10 @@ class ImageCanvas(QWidget):
         y = (event_y - offset_y) * scale_y
         
         return x, y
+    
+    def get_image_position(self, pos):
+        """将QPoint窗口坐标转换为原始图像坐标"""
+        return self.get_image_coordinates(pos.x(), pos.y())
     
     def get_box_at_position(self, x, y):
         """获取指定位置的边界框索引和编辑模式"""
@@ -372,10 +481,44 @@ class ImageCanvas(QWidget):
             self.setCursor(Qt.ArrowCursor)
     
     def mousePressEvent(self, event):
+        """处理鼠标按下事件"""
         if not self.pixmap:
             return
             
-        x, y = self.get_image_coordinates(event.x(), event.y())
+        # 获取缩放后的鼠标位置
+        pos = self.get_scaled_pos(event.pos())
+        
+        # 特征点编辑模式
+        if self.keypoint_edit_mode:
+            # 检查是否点击了已有特征点（用于移动或删除）
+            if event.button() == Qt.LeftButton:
+                # 先检查是否点击了已有特征点（用于移动）
+                for box_idx, box in enumerate(self.boxes):
+                    if box.has_keypoints():
+                        for kp_idx, kp in enumerate(box.keypoints):
+                            kp_x, kp_y = kp
+                            # 检查鼠标是否在特征点上
+                            if abs(kp_x - pos.x()) <= self.keypoint_radius * 2 and abs(kp_y - pos.y()) <= self.keypoint_radius * 2:
+                                # 开始移动特征点
+                                self.moving_keypoint = True
+                                self.moving_keypoint_box_index = box_idx
+                                self.moving_keypoint_index = kp_idx
+                                self.setCursor(Qt.ClosedHandCursor)  # 设置为抓取光标
+                                return
+                
+                # 如果没有点击已有特征点，且有选中的边界框，则添加新特征点
+                if self.selected_box_index >= 0 and self.selected_box_index < len(self.boxes):
+                    box = self.boxes[self.selected_box_index]
+                    # 检查点击位置是否在边界框内
+                    if box.contains_point(pos.x(), pos.y()):
+                        # 添加特征点
+                        if box.add_keypoint(pos.x(), pos.y()):
+                            self.update()
+                            return
+            return
+        
+        # 非特征点编辑模式的处理逻辑
+        x, y = self.get_image_position(event.pos())
         if x is None or y is None:
             return
             
@@ -402,22 +545,94 @@ class ImageCanvas(QWidget):
             
             self.update()
     
+    def mouseDoubleClickEvent(self, event):
+        """双击事件处理，用于删除特征点"""
+        if not self.pixmap or not self.keypoint_edit_mode:
+            return
+            
+        # 获取图像坐标系中的点击位置
+        pos = self.get_image_position(event.pos())
+        if pos is None:
+            return
+            
+        x, y = pos
+        
+        # 检查是否双击了特征点
+        for i, box in enumerate(self.boxes):
+            if not box.has_keypoints():
+                continue
+                
+            keypoints = box.get_keypoints()
+            for j, kp in enumerate(keypoints):
+                # 处理特征点数据可能只有2个值的情况
+                if len(kp) >= 3:
+                    kp_x, kp_y, _ = kp
+                else:
+                    kp_x, kp_y = kp
+                    
+                # 计算点击位置与特征点的距离
+                distance = np.sqrt((x - kp_x)**2 + (y - kp_y)**2)
+                
+                # 如果距离小于阈值，删除该特征点
+                if distance <= 5:  # 5像素的容差
+                    # 删除特征点
+                    new_keypoints = np.delete(keypoints, j, axis=0)
+                    box.set_keypoints(new_keypoints)
+                    self.update()
+                    self.parent.save_current()  # 保存修改
+                    return
+    
     def mouseMoveEvent(self, event):
+        """处理鼠标移动事件"""
         if not self.pixmap:
             return
             
-        x, y = self.get_image_coordinates(event.x(), event.y())
+        # 获取缩放后的鼠标位置
+        pos = self.get_scaled_pos(event.pos())
+        
+        # 特征点编辑模式
+        if self.keypoint_edit_mode:
+            # 如果正在移动特征点
+            if self.moving_keypoint and self.moving_keypoint_box_index >= 0 and self.moving_keypoint_index >= 0:
+                box = self.boxes[self.moving_keypoint_box_index]
+                # 更新特征点位置
+                if box.has_keypoints() and self.moving_keypoint_index < len(box.keypoints):
+                    # 确保特征点在边界框内
+                    x = max(box.x1, min(pos.x(), box.x2))
+                    y = max(box.y1, min(pos.y(), box.y2))
+                    box.keypoints[self.moving_keypoint_index] = [x, y]
+                    self.update()
+                return
+            
+            # 检查鼠标是否悬停在特征点上，更新光标
+            cursor_set = False
+            for box in self.boxes:
+                if box.has_keypoints():
+                    for kp in box.keypoints:
+                        kp_x, kp_y = kp
+                        if abs(kp_x - pos.x()) <= self.keypoint_radius * 2 and abs(kp_y - pos.y()) <= self.keypoint_radius * 2:
+                            self.setCursor(Qt.OpenHandCursor)  # 设置为手形光标
+                            cursor_set = True
+                            break
+                if cursor_set:
+                    break
+            
+            if not cursor_set:
+                # 如果有选中的边界框，且鼠标在边界框内，显示十字光标
+                if self.selected_box_index >= 0 and self.selected_box_index < len(self.boxes):
+                    box = self.boxes[self.selected_box_index]
+                    if box.contains_point(pos.x(), pos.y()):
+                        self.setCursor(Qt.CrossCursor)
+                    else:
+                        self.setCursor(Qt.ArrowCursor)
+                else:
+                    self.setCursor(Qt.ArrowCursor)
+            return
+        
+        # 非特征点编辑模式的处理逻辑
+        x, y = self.get_image_position(event.pos())
         if x is None or y is None:
             self.setCursor(Qt.ArrowCursor)
-            return
-            
-        # 如果没有按下鼠标按钮，更新鼠标指针样式
-        if event.buttons() == Qt.NoButton:
-            box_index, edit_mode, handle = self.get_box_at_position(x, y)
-            if box_index >= 0:
-                self.update_cursor(edit_mode, handle)
-            else:
-                self.setCursor(Qt.ArrowCursor)
             return
             
         # 处理边界框编辑
@@ -533,4 +748,23 @@ class ImageCanvas(QWidget):
     
     def reset_zoom(self):
         self.scale_factor = 1.0
+        self.update()
+
+    def toggle_keypoint_mode(self, enabled=None):
+        """切换特征点编辑模式"""
+        if enabled is not None:
+            self.keypoint_edit_mode = enabled
+        else:
+            self.keypoint_edit_mode = not self.keypoint_edit_mode
+        
+        # 更新鼠标指针
+        if self.keypoint_edit_mode:
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+        
+        # 取消当前选择
+        self.selected_box_index = -1
+        
+        # 仅更新画布，不触发布局变化
         self.update()

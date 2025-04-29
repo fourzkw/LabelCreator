@@ -23,7 +23,8 @@ class YOLOPredictor:
         self.iou_threshold = 0.45
         self.max_detections = 100
         self.device = "cpu"  # 默认使用CPU
-        self.model_type = None  # 'yolov5', 'yolov8', 'onnx'
+        self.model_type = None  # 'yolov8', 'onnx'
+        self.keypoints_number = 0  # 特征点数量，0表示使用模型默认值
         
         # 检测可用设备
         self.available_devices = ["cpu"]
@@ -33,7 +34,7 @@ class YOLOPredictor:
         else:
             logger.info(f"CUDA不可用，使用设备: cpu")
     
-    def set_params(self, conf_threshold=None, iou_threshold=None, max_detections=None, device=None):
+    def set_params(self, conf_threshold=None, iou_threshold=None, max_detections=None, device=None, keypoints_number=None):
         """设置预测参数"""
         if conf_threshold is not None:
             self.conf_threshold = conf_threshold
@@ -50,6 +51,9 @@ class YOLOPredictor:
                     logger.info(f"模型已移动到设备: {self.device}")
                 except Exception as e:
                     logger.error(f"移动模型到设备 {self.device} 失败: {str(e)}")
+        if keypoints_number is not None:
+            self.keypoints_number = keypoints_number
+            logger.info(f"设置特征点数量: {self.keypoints_number}")
     
     def load_model(self, model_path):
         """加载YOLO模型"""
@@ -84,24 +88,11 @@ class YOLOPredictor:
                 logger.info("YOLOv8模型加载成功")
                 return True
                 
-            # 尝试使用 torch.hub 加载 YOLOv5 模型
+            # YOLOv5 模型 - 待实现
             else:
-                try:
-                    self.model = torch.hub.load('ultralytics/yolov5', 'custom', 
-                                               path=model_path, device=self.device)
-                    
-                    # 设置NMS参数
-                    self.model.conf = self.conf_threshold
-                    self.model.iou = self.iou_threshold
-                    self.model.max_det = self.max_detections
-                    
-                    self.model_type = 'yolov5'
-                    logger.info("YOLOv5模型加载成功")
-                    return True
-                except Exception as e:
-                    logger.error(f"使用torch.hub加载YOLOv5模型失败: {str(e)}")
-                    logger.error(f"请尝试将模型转换为ONNX格式或安装ultralytics包")
-                    return False
+                logger.error("YOLOv5 模型加载功能尚未实现")
+                logger.error("请使用 ONNX 格式或安装 ultralytics 包使用 YOLOv8")
+                return False
                 
         except Exception as e:
             logger.error(f"加载模型失败: {str(e)}")
@@ -126,8 +117,9 @@ class YOLOPredictor:
                 return self._predict_onnx(image_path)
             elif self.model_type == 'yolov8':
                 return self._predict_yolov8(image_path)
-            else:  # yolov5
-                return self._predict_yolov5(image_path)
+            else:
+                logger.error(f"不支持的模型类型: {self.model_type}")
+                return []
                 
         except Exception as e:
             logger.error(f"预测失败: {str(e)}")
@@ -135,40 +127,26 @@ class YOLOPredictor:
             return []
     
     def _predict_yolov5(self, image_path):
-        """使用YOLOv5模型预测"""
-        # 确保模型在正确的设备上
-        self.model.to(self.device)
-        
-        # 进行预测
-        results = self.model(image_path)
-        
-        # 提取预测结果
-        predictions = []
-        for pred in results.xyxy[0]:
-            x1, y1, x2, y2, conf, cls = pred.cpu().numpy()
-            
-            # 将字典改为BoundingBox对象
-            predictions.append(BoundingBox(
-                x1=float(x1),
-                y1=float(y1),
-                x2=float(x2),
-                y2=float(y2),
-                class_id=int(cls),
-                confidence=float(conf)
-            ))
-        
-        return predictions
+        """使用YOLOv5模型预测 - 待实现"""
+        logger.error("YOLOv5 预测功能尚未实现")
+        return []
     
     def _predict_yolov8(self, image_path):
         """使用YOLOv8模型预测"""
         # 设置参数
-        results = self.model.predict(
-            source=image_path,
-            conf=self.conf_threshold,
-            iou=self.iou_threshold,
-            max_det=self.max_detections,
-            device=self.device
-        )
+        predict_args = {
+            "source": image_path,
+            "conf": self.conf_threshold,
+            "iou": self.iou_threshold,
+            "max_det": self.max_detections,
+            "device": self.device
+        }
+        
+        # 如果设置了特征点数量且大于0，则添加到预测参数中
+        if self.keypoints_number > 0:
+            predict_args["kpt_num"] = self.keypoints_number
+            
+        results = self.model.predict(**predict_args)
         
         # 提取预测结果
         predictions = []
@@ -182,15 +160,32 @@ class YOLOPredictor:
                 conf = box.conf[0].cpu().numpy()
                 cls = box.cls[0].cpu().numpy()
                 
-                # 将字典改为BoundingBox对象
-                predictions.append(BoundingBox(
+                # 创建边界框对象
+                bbox = BoundingBox(
                     x1=float(x1),
                     y1=float(y1),
                     x2=float(x2),
                     y2=float(y2),
                     class_id=int(cls),
                     confidence=float(conf)
-                ))
+                )
+                
+                # 检查是否有关键点数据
+                if hasattr(result, 'keypoints') and result.keypoints is not None:
+                    try:
+                        # 提取关键点数据
+                        keypoints = result.keypoints[i].data[0].cpu().numpy()
+                        # 只保留 x, y 坐标，去掉置信度
+                        if len(keypoints) > 0:
+                            # 转换为只包含 x, y 的数组
+                            keypoints_xy = keypoints[:, :2]
+                            # 设置边界框的关键点
+                            bbox.set_keypoints(keypoints_xy)
+                            logger.info(f"检测到 {len(keypoints_xy)} 个特征点")
+                    except Exception as e:
+                        logger.error(f"提取特征点时出错: {str(e)}")
+                
+                predictions.append(bbox)
         
         return predictions
     

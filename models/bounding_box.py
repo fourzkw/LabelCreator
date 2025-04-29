@@ -1,23 +1,15 @@
 class BoundingBox:
-    """
-    表示YOLO格式的边界框对象
+    """边界框类，用于存储和操作边界框数据"""
     
-    Attributes:
-        x1 (int): 左上角x坐标（规范化前）
-        y1 (int): 左上角y坐标（规范化前）
-        x2 (int): 右下角x坐标（规范化前）
-        y2 (int): 右下角y坐标（规范化前）
-        class_id (int): 类别ID，默认为0
-    """
-    def __init__(self, x1, y1, x2, y2, class_id=0, confidence=1.0):
-        # 确保坐标顺序正确（左上角到右下角）
-        self.x1 = min(x1, x2)
-        self.y1 = min(y1, y2)
-        self.x2 = max(x1, x2)
-        self.y2 = max(y1, y2)
+    def __init__(self, x1, y1, x2, y2, class_id, confidence=1.0):
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
         self.class_id = class_id
         self.confidence = confidence
-    
+        self.keypoints = None  # 存储特征点数据
+        
     def to_yolo_format(self, img_width, img_height):
         """
         将坐标转换为YOLO格式
@@ -98,3 +90,19 @@ class BoundingBox:
         if abs(x - self.x2) <= margin and abs(y - self.y2) <= margin:
             return 'bottom-right'
         return None
+    
+    def set_keypoints(self, keypoints):
+        """设置特征点数据
+        
+        Args:
+            keypoints: numpy数组，格式为 [[x1, y1], [x2, y2], ...]
+        """
+        self.keypoints = keypoints
+        
+    def has_keypoints(self):
+        """检查是否有特征点数据"""
+        return self.keypoints is not None and len(self.keypoints) > 0
+        
+    def get_keypoints(self):
+        """获取特征点数据"""
+        return self.keypoints

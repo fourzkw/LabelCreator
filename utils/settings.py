@@ -16,7 +16,8 @@ DEFAULT_SHORTCUTS = {
     'open_directory': 'Ctrl+O',
     'exit': 'Ctrl+Q',
     'auto_label': 'Ctrl+A',
-    'auto_label_all': 'Ctrl+Shift+A'  # 添加批量标注的默认快捷键
+    'auto_label_all': 'Ctrl+Shift+A',  # 添加批量标注的默认快捷键
+    'toggle_keypoint_mode': 'Ctrl+K'   # 添加特征点编辑模式的默认快捷键
 }
 
 class Settings:
