@@ -677,8 +677,6 @@ class YOLOLabelCreator(QMainWindow):
     
     def update_current_class(self, index):
         self.canvas.set_current_class(index)
-        # 移除自动保存，避免仅切换类别就覆盖标签文件
-        # self.save_current()  # 注释掉这行
     
     def get_class_name(self, class_id):
         if 0 <= class_id < len(self.classes):
