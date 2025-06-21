@@ -41,7 +41,7 @@ class BoundingBox:
         Args:
             x (float): 点的x坐标
             y (float): 点的y坐标
-            margin (int): 边缘检测的容差像素
+            margin (int): 边缘检测的容差像素，设置为0时检查点是否严格在边界框内
             
         Returns:
             bool: 如果点在边界框内部则返回True
@@ -112,7 +112,7 @@ class BoundingBox:
         Returns:
             bool: 是否成功添加特征点
         """
-        # 确保坐标在边界框内
+        # 确保坐标在边界框内，允许点位于边缘上
         if not (self.x1 <= x <= self.x2 and self.y1 <= y <= self.y2):
             return False
             

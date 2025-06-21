@@ -3,6 +3,7 @@ import yaml
 import logging
 import traceback
 import shutil
+import numpy as np
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QListWidget, QMessageBox,
                              QComboBox, QLineEdit, QSplitter, QAction, QTreeView,
@@ -305,12 +306,21 @@ class YOLOLabelCreator(QMainWindow):
         zoom_out_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         reset_zoom_button = QPushButton(tr("Reset Zoom"))
         reset_zoom_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        
+        # 辅助线切换按钮
+        self.guide_lines_button = QPushButton(tr("辅助线"))
+        self.guide_lines_button.setIcon(self.style().standardIcon(QStyle.SP_LineEditClearButton))
+        self.guide_lines_button.setCheckable(True)
+        self.guide_lines_button.setChecked(True)  # 默认启用
+        self.guide_lines_button.clicked.connect(self.toggle_guide_lines)
+        
         zoom_in_button.clicked.connect(self.canvas.zoom_in)
         zoom_out_button.clicked.connect(self.canvas.zoom_out)
         reset_zoom_button.clicked.connect(self.canvas.reset_zoom)
         zoom_layout.addWidget(zoom_in_button)
         zoom_layout.addWidget(zoom_out_button)
         zoom_layout.addWidget(reset_zoom_button)
+        zoom_layout.addWidget(self.guide_lines_button)
         
         # Add widgets to right layout
         right_layout.addWidget(canvas_frame, 1)  # 让画布占据大部分空间
@@ -599,7 +609,7 @@ class YOLOLabelCreator(QMainWindow):
                 
                 for line in lines:
                     parts = line.strip().split()
-                    if len(parts) == 5:
+                    if len(parts) >= 5:  # 至少有5个值（类别和边界框坐标）
                         class_id = int(parts[0])
                         x_center = float(parts[1])
                         y_center = float(parts[2])
@@ -621,11 +631,26 @@ class YOLOLabelCreator(QMainWindow):
                         y2 = (y_center + height/2) * img_height
                         
                         box = BoundingBox(x1, y1, x2, y2, class_id)
+                        
+                        # 检查是否有特征点数据
+                        if len(parts) > 5 and (len(parts) - 5) % 2 == 0:
+                            # 特征点数据是成对的 x,y 坐标
+                            keypoints = []
+                            for i in range(5, len(parts), 2):
+                                if i + 1 < len(parts):
+                                    kp_x = float(parts[i]) * img_width   # 将归一化坐标转回像素坐标
+                                    kp_y = float(parts[i+1]) * img_height
+                                    keypoints.append([kp_x, kp_y])
+                            
+                            if keypoints:
+                                box.set_keypoints(np.array(keypoints))
+                        
                         self.canvas.boxes.append(box)
                 
                 self.update_box_list()
                 self.canvas.update()
         except Exception as e:
+            logger.error(f"加载标注文件失败: {str(e)}\n{traceback.format_exc()}")
             QMessageBox.warning(self, tr("Error"), f"{tr('Failed to load annotations')}: {str(e)}")
     
     def update_box_list(self):
@@ -1109,3 +1134,18 @@ class YOLOLabelCreator(QMainWindow):
             
         # 确保窗口大小不变
         self.resize(current_size)
+        
+    def toggle_guide_lines(self):
+        """切换辅助线显示"""
+        is_checked = self.guide_lines_button.isChecked()
+        
+        # 切换辅助线显示状态
+        self.canvas.toggle_guide_lines(is_checked)
+        
+        # 更新按钮文本
+        if is_checked:
+            self.guide_lines_button.setText(tr("隐藏辅助线"))
+            self.statusBar().showMessage(tr("辅助线已启用"), 2000)
+        else:
+            self.guide_lines_button.setText(tr("显示辅助线"))
+            self.statusBar().showMessage(tr("辅助线已禁用"), 2000)

@@ -40,6 +40,12 @@ class ImageCanvas(QWidget):
         self.edit_handle = None  # 当前编辑的边缘或角点
         self.last_cursor_pos = None  # 上一次鼠标位置
         
+        # 添加图像拖动相关属性
+        self.is_panning = False  # 是否正在拖动图像
+        self.pan_start_pos = None  # 拖动开始位置
+        self.offset_x = 0  # 图像X轴偏移量
+        self.offset_y = 0  # 图像Y轴偏移量
+        
         # 设置鼠标跟踪，以便接收mouseMoveEvent即使没有按下鼠标按钮
         self.setMouseTracking(True)
         
@@ -61,6 +67,10 @@ class ImageCanvas(QWidget):
         self.moving_keypoint = False  # 是否正在移动特征点
         self.moving_keypoint_box_index = -1  # 正在移动特征点所属的边界框索引
         self.moving_keypoint_index = -1  # 正在移动的特征点索引
+        
+        # 添加辅助线属性
+        self.guide_lines_enabled = True  # 是否启用辅助线
+        self.mouse_pos = None  # 当前鼠标位置
     def load_image(self, image_path):
         """
         安全加载图像及关联标注文件，确保异常情况下不丢失已有数据
@@ -237,9 +247,9 @@ class ImageCanvas(QWidget):
                                               int(self.height() * self.scale_factor),
                                               Qt.KeepAspectRatio)
             
-            # Center the image
-            x_offset = (self.width() - scaled_pixmap.width()) // 2
-            y_offset = (self.height() - scaled_pixmap.height()) // 2
+            # Center the image and apply pan offset
+            x_offset = (self.width() - scaled_pixmap.width()) // 2 + self.offset_x
+            y_offset = (self.height() - scaled_pixmap.height()) // 2 + self.offset_y
             
             # 绘制图像阴影
             shadow_offset = 5
@@ -319,6 +329,24 @@ class ImageCanvas(QWidget):
             # Draw the box being created
             if self.current_box:
                 self.draw_box(painter, self.current_box, x_offset, y_offset, scaled_pixmap.width(), scaled_pixmap.height())
+                
+            # 绘制辅助线（十字线）
+            if self.guide_lines_enabled and self.mouse_pos and self.pixmap:
+                mouse_x, mouse_y = self.mouse_pos.x(), self.mouse_pos.y()
+                
+                # 判断鼠标是否在图像范围内
+                if (x_offset <= mouse_x <= x_offset + scaled_pixmap.width() and 
+                    y_offset <= mouse_y <= y_offset + scaled_pixmap.height()):
+                    
+                    # 设置辅助线样式：半透明蓝色虚线
+                    guide_pen = QPen(QColor(0, 120, 215, 180), 1, Qt.DashLine)
+                    painter.setPen(guide_pen)
+                    
+                    # 绘制水平辅助线
+                    painter.drawLine(x_offset, mouse_y, x_offset + scaled_pixmap.width(), mouse_y)
+                    
+                    # 绘制垂直辅助线
+                    painter.drawLine(mouse_x, y_offset, mouse_x, y_offset + scaled_pixmap.height())
     
     def draw_box(self, painter, box, offset_x, offset_y, img_width, img_height, is_selected=False):
         # Get original image dimensions
@@ -399,8 +427,8 @@ class ImageCanvas(QWidget):
         scaled_pixmap = self.pixmap.scaled(int(self.width() * self.scale_factor), 
                                           int(self.height() * self.scale_factor),
                                           Qt.KeepAspectRatio)
-        offset_x = (self.width() - scaled_pixmap.width()) // 2
-        offset_y = (self.height() - scaled_pixmap.height()) // 2
+        offset_x = (self.width() - scaled_pixmap.width()) // 2 + self.offset_x
+        offset_y = (self.height() - scaled_pixmap.height()) // 2 + self.offset_y
         
         # 转换为原始图像坐标
         orig_width = self.pixmap.width()
@@ -421,8 +449,8 @@ class ImageCanvas(QWidget):
         scaled_pixmap = self.pixmap.scaled(int(self.width() * self.scale_factor), 
                                           int(self.height() * self.scale_factor),
                                           Qt.KeepAspectRatio)
-        offset_x = (self.width() - scaled_pixmap.width()) // 2
-        offset_y = (self.height() - scaled_pixmap.height()) // 2
+        offset_x = (self.width() - scaled_pixmap.width()) // 2 + self.offset_x
+        offset_y = (self.height() - scaled_pixmap.height()) // 2 + self.offset_y
         
         # 检查点是否在图像范围内
         if not (offset_x <= event_x <= offset_x + scaled_pixmap.width() and
@@ -485,6 +513,13 @@ class ImageCanvas(QWidget):
         if not self.pixmap:
             return
             
+        # 中键按下处理图像拖动
+        if event.button() == Qt.MiddleButton:
+            self.is_panning = True
+            self.pan_start_pos = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)  # 设置为抓取光标
+            return
+            
         # 获取缩放后的鼠标位置
         pos = self.get_scaled_pos(event.pos())
         
@@ -509,11 +544,12 @@ class ImageCanvas(QWidget):
                 # 如果没有点击已有特征点，且有选中的边界框，则添加新特征点
                 if self.selected_box_index >= 0 and self.selected_box_index < len(self.boxes):
                     box = self.boxes[self.selected_box_index]
-                    # 检查点击位置是否在边界框内
-                    if box.contains_point(pos.x(), pos.y()):
+                    # 直接检查点击位置是否在边界框的确切边界内，不使用边缘容差
+                    if box.x1 <= pos.x() <= box.x2 and box.y1 <= pos.y() <= box.y2:
                         # 添加特征点
                         if box.add_keypoint(pos.x(), pos.y()):
                             self.update()
+                            self.parent.save_current()  # 保存修改
                             return
             return
         
@@ -585,6 +621,20 @@ class ImageCanvas(QWidget):
     def mouseMoveEvent(self, event):
         """处理鼠标移动事件"""
         if not self.pixmap:
+            return
+            
+        # 更新鼠标位置（用于辅助线绘制）
+        self.mouse_pos = event.pos()
+        self.update()  # 触发重绘
+            
+        # 处理图像拖动
+        if self.is_panning and self.pan_start_pos:
+            # 计算鼠标移动距离
+            delta = event.pos() - self.pan_start_pos
+            self.offset_x += delta.x()
+            self.offset_y += delta.y()
+            self.pan_start_pos = event.pos()
+            self.update()  # 重绘画布
             return
             
         # 获取缩放后的鼠标位置
@@ -698,6 +748,13 @@ class ImageCanvas(QWidget):
         if not self.pixmap:
             return
             
+        # 处理中键释放，结束图像拖动
+        if event.button() == Qt.MiddleButton:
+            self.is_panning = False
+            self.pan_start_pos = None
+            self.setCursor(Qt.ArrowCursor)
+            return
+            
         # 特征点编辑模式下的释放处理
         if self.keypoint_edit_mode:
             if event.button() == Qt.LeftButton and self.moving_keypoint:
@@ -705,7 +762,10 @@ class ImageCanvas(QWidget):
                 self.moving_keypoint = False
                 self.setCursor(Qt.CrossCursor)  # 恢复十字光标
                 
-                # 如果有修改，更新界面
+                # 保存更新的特征点位置
+                self.parent.save_current()  # 保存修改
+                
+                # 更新界面
                 self.update()
             return
             
@@ -820,6 +880,8 @@ class ImageCanvas(QWidget):
     
     def reset_zoom(self):
         self.scale_factor = 1.0
+        self.offset_x = 0  # 重置X轴偏移
+        self.offset_y = 0  # 重置Y轴偏移
         self.update()
 
     def toggle_keypoint_mode(self, enabled=None):
@@ -839,4 +901,14 @@ class ImageCanvas(QWidget):
         self.selected_box_index = -1
         
         # 仅更新画布，不触发布局变化
+        self.update()
+        
+    def toggle_guide_lines(self, enabled=None):
+        """切换辅助线显示"""
+        if enabled is not None:
+            self.guide_lines_enabled = enabled
+        else:
+            self.guide_lines_enabled = not self.guide_lines_enabled
+            
+        # 更新画布
         self.update()
