@@ -242,6 +242,23 @@ class DatasetSplitDialog(QDialog):
                 logger.warning(f"在 {source_path} 中没有找到有效的图像和标签对")
                 return
             
+            # 检查是否是姿态检测数据集（查看标签文件中是否有关键点数据）
+            is_pose_dataset = False
+            sample_label_path = valid_pairs[0][1]
+            try:
+                with open(sample_label_path, 'r') as f:
+                    label_content = f.readline().strip()
+                    parts = label_content.split()
+                    # 如果标签行包含的数值超过5个，则认为这是一个包含关键点的姿态检测数据集
+                    # 标准YOLO格式为：class_id x_center y_center width height
+                    # 姿态检测格式为：class_id x_center y_center width height x1 y1 x2 y2 ...
+                    if len(parts) > 5:
+                        is_pose_dataset = True
+                        logger.info(f"检测到姿态检测数据集，包含关键点数据")
+            except Exception as e:
+                logger.error(f"检查数据集类型时出错: {str(e)}")
+                # 即使出错也继续执行，当作普通数据集处理
+            
             logger.info(f"找到 {len(valid_pairs)} 个有效的图像和标签对")
             
             # 设置随机种子
@@ -297,10 +314,15 @@ class DatasetSplitDialog(QDialog):
                     logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
                     continue
                 
-                # 复制标签
+                # 复制标签 - 使用读写方式确保完整复制特征点数据
                 dest_label_path = os.path.join(output_path, "train", "labels", label_file)
                 try:
-                    shutil.copy2(label_path, dest_label_path)
+                    # 使用读写模式复制文件内容，而不是直接复制文件
+                    with open(label_path, 'r', encoding='utf-8') as src_file:
+                        content = src_file.read()
+                        
+                    with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
+                        dst_file.write(content)
                 except Exception as e:
                     logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
                     continue
@@ -324,10 +346,15 @@ class DatasetSplitDialog(QDialog):
                     logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
                     continue
                 
-                # 复制标签
+                # 复制标签 - 使用读写方式确保完整复制特征点数据
                 dest_label_path = os.path.join(output_path, "val", "labels", label_file)
                 try:
-                    shutil.copy2(label_path, dest_label_path)
+                    # 使用读写模式复制文件内容，而不是直接复制文件
+                    with open(label_path, 'r', encoding='utf-8') as src_file:
+                        content = src_file.read()
+                        
+                    with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
+                        dst_file.write(content)
                 except Exception as e:
                     logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
                     continue
@@ -351,10 +378,15 @@ class DatasetSplitDialog(QDialog):
                     logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
                     continue
                 
-                # 复制标签
+                # 复制标签 - 使用读写方式确保完整复制特征点数据
                 dest_label_path = os.path.join(output_path, "test", "labels", label_file)
                 try:
-                    shutil.copy2(label_path, dest_label_path)
+                    # 使用读写模式复制文件内容，而不是直接复制文件
+                    with open(label_path, 'r', encoding='utf-8') as src_file:
+                        content = src_file.read()
+                        
+                    with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
+                        dst_file.write(content)
                 except Exception as e:
                     logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
                     continue
@@ -421,19 +453,62 @@ class DatasetSplitDialog(QDialog):
                         f.write(f"test: test/images\n\n")
                         f.write(f"nc: {len(classes)}\n")
                         f.write(f"names: {classes}\n")
+                        
+                        # 如果是姿态检测数据集，添加关键点配置
+                        if is_pose_dataset:
+                            # 尝试确定关键点数量
+                            try:
+                                with open(sample_label_path, 'r') as label_f:
+                                    label_content = label_f.readline().strip()
+                                    parts = label_content.split()
+                                    # 计算关键点对数量：(总参数数量 - 5) / 2
+                                    # 5个是class_id、x_center、y_center、width、height
+                                    kpt_count = (len(parts) - 5) // 2
+                                    
+                                    # 检查是否有可见性参数 (dim = 3)
+                                    has_visibility = (len(parts) - 5) % 3 == 0
+                                    kpt_dim = 3 if has_visibility else 2
+                                    
+                                    if has_visibility:
+                                        # 如果有可见性参数，重新计算关键点数量
+                                        kpt_count = (len(parts) - 5) // 3
+                                    
+                                    f.write(f"\n# 关键点配置\n")
+                                    f.write(f"kpt_shape: [{kpt_count}, {kpt_dim}]  # 关键点数量, 维度(2为x,y或3为x,y,visible)\n")
+                                    
+                                    # 添加默认的翻转索引（假设关键点是对称的）
+                                    # 这里只是提供一个默认值，用户可能需要手动调整
+                                    flip_idx = list(range(kpt_count))
+                                    f.write(f"flip_idx: {flip_idx}  # 对称关键点的翻转索引，需要根据实际情况调整\n")
+                                    
+                                    logger.info(f"为姿态检测数据集添加了关键点配置: {kpt_count}个关键点, {kpt_dim}维")
+                            except Exception as e:
+                                logger.error(f"生成关键点配置时出错: {str(e)}")
+                                # 添加一个通用的关键点配置，提示用户手动修改
+                                f.write(f"\n# 关键点配置 (请根据实际数据集调整)\n")
+                                f.write(f"kpt_shape: [17, 3]  # 关键点数量, 维度\n")
+                                f.write(f"flip_idx: [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]  # 对称关键点的翻转索引\n")
+                    
                     logger.info(f"成功创建YAML文件: {yaml_path}")
                 except Exception as e:
                     logger.error(f"创建YAML文件失败: {yaml_path}, 错误: {str(e)}")
                     QMessageBox.warning(self, tr("警告"), tr(f"创建YAML文件失败: {str(e)}"))
             
             if not progress.wasCanceled():
-                QMessageBox.information(
-                    self, tr("完成"), 
-                    tr(f"数据集划分完成!\n"
-                       f"训练集: {len(train_files)} 文件\n"
-                       f"验证集: {len(val_files)} 文件\n"
-                       f"测试集: {len(test_files)} 文件")
-                )
+                # 构建完成消息
+                complete_message = tr(f"数据集划分完成!\n"
+                                      f"训练集: {len(train_files)} 文件\n"
+                                      f"验证集: {len(val_files)} 文件\n"
+                                      f"测试集: {len(test_files)} 文件")
+                
+                # 如果是姿态检测数据集，添加额外提示
+                if is_pose_dataset and create_yaml:
+                    complete_message += tr("\n\n检测到姿态检测数据集!\n"
+                                          "已在data.yaml中添加了关键点配置。\n"
+                                          "请检查data.yaml文件中的kpt_shape和flip_idx是否正确，\n"
+                                          "并根据实际情况调整flip_idx（关键点对称翻转索引）。")
+                
+                QMessageBox.information(self, tr("完成"), complete_message)
                 self.accept()
             
         except Exception as e:

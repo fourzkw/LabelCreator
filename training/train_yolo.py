@@ -50,11 +50,23 @@ def print_settings(settings):
     print(f"  设备: {settings['device'] or '默认'}")
     print(f"  余弦学习率调度: {settings['cos_lr']}")
     print(f"  缓存图像: {settings['cache']}")
+    
+    # 特征点设置
+    if settings.get('enable_keypoints', False):
+        print(f"\n特征点设置:")
+        print(f"  启用特征点检测: {settings.get('enable_keypoints', False)}")
+        print(f"  任务类型: pose (姿态检测)")
     print("=" * 50 + "\n")
 
 def train_yolo(settings):
     """使用设置训练YOLOv8模型"""
     try:
+        # 先确定任务类型
+        task = "detect"  # 默认任务类型
+        if settings.get('enable_keypoints', False):
+            task = "pose"
+            print(f"启用特征点检测训练，使用pose任务类型")
+
         # 构建模型
         if settings.get('use_custom_model', False) and settings.get('custom_model_path', ''):
             # 使用自定义预训练模型
@@ -64,6 +76,12 @@ def train_yolo(settings):
         else:
             # 使用标准模型
             model_name = settings['model_type']
+            
+            # 根据任务类型选择模型
+            if task == "pose":
+                model_name = f"{model_name}-pose"
+                print(f"选择姿态检测模型: {model_name}")
+                
             if settings['pretrained']:
                 # 使用预训练模型
                 model = YOLO(f"{model_name}.pt")
@@ -113,10 +131,18 @@ def train_yolo(settings):
             train_args['scale'] = settings['scale']
             train_args['fliplr'] = settings['fliplr']
             train_args['mosaic'] = settings['mosaic']
-        
+            
         # 开始训练
         print("\n开始训练...\n")
-        model.train(**train_args)
+        
+        # 确保数据集YAML格式正确
+        if task == "pose" and settings.get('enable_keypoints', False):
+            print("注意：使用姿态检测(pose)任务训练需要特殊格式的数据集YAML文件！")
+            print("数据集YAML必须包含关键点(keypoints)定义和正确的标注格式。")
+            print("详情请参考：https://docs.ultralytics.com/datasets/keypoints/")
+            
+        # 执行训练，指定任务类型
+        model.train(task=task, **train_args)
         
         print("\n训练完成!")
         print(f"模型保存在: {os.path.join(train_args.get('project', ''), train_args.get('name', 'exp'))}")

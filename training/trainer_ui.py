@@ -174,6 +174,8 @@ class YoloTrainerUI(QMainWindow):
         self.custom_model_browse.setEnabled(is_enabled)
         self.model_type.setEnabled(not is_enabled)
         self.pretrained_checkbox.setEnabled(not is_enabled)
+        
+
     
     def setup_advanced_tab(self):
         layout = QVBoxLayout(self.advanced_tab)
@@ -295,6 +297,16 @@ class YoloTrainerUI(QMainWindow):
         advanced_group = QGroupBox("其他高级设置")
         advanced_layout = QFormLayout()
         
+        # 添加特征点检测设置
+        self.keypoints_checkbox = QCheckBox("启用特征点检测(姿态检测)")
+        self.keypoints_checkbox.setChecked(False)
+        advanced_layout.addRow("", self.keypoints_checkbox)
+        
+        # 添加特征点检测提示
+        self.keypoints_note = QLabel("注意：启用特征点检测将使用pose任务类型，需要专用的姿态检测数据集。")
+        self.keypoints_note.setWordWrap(True)
+        advanced_layout.addRow("", self.keypoints_note)
+        
         self.patience = QSpinBox()
         self.patience.setRange(0, 300)
         self.patience.setValue(100)
@@ -388,7 +400,10 @@ class YoloTrainerUI(QMainWindow):
             "workers": self.workers.value(),
             "device": self.device.text(),
             "cos_lr": self.cos_lr.isChecked(),
-            "cache": self.cache.isChecked()
+            "cache": self.cache.isChecked(),
+            
+            # 特征点设置（姿态检测）
+            "enable_keypoints": self.keypoints_checkbox.isChecked()
         }
         return params
     
@@ -451,6 +466,10 @@ class YoloTrainerUI(QMainWindow):
             self.device.setText(self.settings.value("device", ""))
             self.cos_lr.setChecked(self.settings.value("cos_lr", True, type=bool))
             self.cache.setChecked(self.settings.value("cache", False, type=bool))
+            
+            # 加载特征点设置
+            enable_keypoints = self.settings.value("enable_keypoints", False, type=bool)
+            self.keypoints_checkbox.setChecked(enable_keypoints)
             
             self.log_message("已加载保存的设置")
         
