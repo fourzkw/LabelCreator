@@ -17,7 +17,7 @@ from ui.canvas import ImageCanvas
 from i18n import tr
 from utils.yolo_predictor import YOLOPredictor
 from utils.settings import Settings
-from ui.settings_dialog import SettingsDialog  # Import SettingsDialog directly
+from ui.settings_dialog import SettingsDialog
 from ui.model_settings_dialog import ModelSettingsDialog
 from training.trainer_dialog import YoloTrainerDialog
 from ui.dataset_split_dialog import DatasetSplitDialog
@@ -45,7 +45,7 @@ class YOLOLabelCreator(QMainWindow):
         
         # 初始化设置
         app_dir = QDir.currentPath()
-        self.settings = Settings(app_dir)  # Use the imported Settings class
+        self.settings = Settings(app_dir)
         
         # 应用样式表
         self.apply_stylesheet()
@@ -430,6 +430,7 @@ class YOLOLabelCreator(QMainWindow):
         return None
 
     def select_directory(self):
+        # 不再自动保存，直接切换目录
         dir_path = QFileDialog.getExistingDirectory(self, "Select Directory")
         if dir_path:
             self.current_dir = dir_path
@@ -479,6 +480,7 @@ class YOLOLabelCreator(QMainWindow):
     
     def folder_selected(self, index):
         """当文件夹被选中时调用"""
+        # 不再自动保存，直接切换文件夹
         item = self.folder_model.itemFromIndex(index)
         if item:
             folder_path = item.data(Qt.UserRole)
@@ -517,11 +519,18 @@ class YOLOLabelCreator(QMainWindow):
             QMessageBox.warning(self, tr("Error"), f"{tr('Failed to load images')}: {str(e)}")
     
     def load_selected_image(self, item):
+        # 不再在切换图像时自动保存标签，只读取新图像的标签
         self.current_image_index = self.image_list.row(item)
         image_path = os.path.join(self.current_folder, item.text())
         self.load_image(image_path)
     
     def load_image(self, image_path):
+        """
+        加载图像并尝试读取关联的标签文件
+        
+        Args:
+            image_path (str): 要加载的图像文件路径
+        """
         logger.info(f"Loading image in main window: {image_path}")
         # Check if file exists
         if not os.path.exists(image_path):
@@ -531,17 +540,23 @@ class YOLOLabelCreator(QMainWindow):
             return
         
         try:    
-            # Load image to canvas
+            # 首先加载图像到画布
             self.canvas.load_image(image_path)
             
-            # If image loading failed, pixmap will be None
+            # 如果图像加载失败，pixmap将为None
             if not self.canvas.pixmap:
                 error_msg = tr("Failed to load image") + f": {image_path}"
                 logger.error(error_msg)
                 QMessageBox.warning(self, tr("Error"), error_msg)
                 return
             
-            # Check for existing annotation file
+            # 清空现有边界框以避免重复
+            original_box_count = len(self.canvas.boxes)
+            if original_box_count > 0:
+                logger.info(f"清空加载新图像前的边界框，数量: {original_box_count}")
+                self.canvas.boxes = []
+            
+            # 检查是否存在对应的标注文件
             label_path = self.get_label_path(image_path)
             if os.path.exists(label_path):
                 logger.info(f"Found existing annotation file: {label_path}")
@@ -550,6 +565,10 @@ class YOLOLabelCreator(QMainWindow):
                 logger.info(f"No existing annotation file found for: {image_path}")
                 self.canvas.boxes = []
                 self.update_box_list()
+                
+            # 验证加载后的边界框数量
+            loaded_box_count = len(self.canvas.boxes)
+            logger.info(f"图像加载完成后的边界框数量: {loaded_box_count}")
                 
             logger.info(f"Successfully loaded image: {image_path}")
         except FileNotFoundError as e:
@@ -563,24 +582,10 @@ class YOLOLabelCreator(QMainWindow):
             QMessageBox.warning(self, tr("Error"), error_msg)
     
     def get_label_path(self, image_path):
-        """
-        生成YOLO格式标签文件路径
-
-        参数:
-            image_path (str): 原始图像文件的绝对路径
-
-        返回:
-            str: 对应标签文件的绝对路径，保存在datasave/labels目录下
-
-        说明:
-            - 自动创建labels目录（如果不存在）
-            - 标签文件名与图像文件名保持一致，扩展名为.txt
-            - 路径转换示例：
-              /images/train/dog.jpg → /datasave/labels/dog.txt
-        """
+        """根据图像路径生成对应的YOLO格式标签文件路径"""
         # 提取图像文件名（不含扩展名）
-        image_filename = os.path.basename(image_path)  # 从完整路径中获取文件名
-        base_name = os.path.splitext(image_filename)[0]  # 去除文件扩展名
+        image_filename = os.path.basename(image_path)
+        base_name = os.path.splitext(image_filename)[0]
         
         # 创建标签目录结构
         image_dir = os.path.dirname(image_path)
@@ -590,68 +595,105 @@ class YOLOLabelCreator(QMainWindow):
         if not os.path.exists(label_subdir):
             os.makedirs(label_subdir, exist_ok=True)
             
-        # 生成标准化标签文件路径
-        return os.path.normpath(  # 规范化路径分隔符
-            os.path.join(label_subdir, f"{base_name}.txt")
-        )
+        return os.path.normpath(os.path.join(label_subdir, f"{base_name}.txt"))
     
     def load_annotations(self, label_path):
-        self.canvas.boxes = []
-        
-        # Check if pixmap is valid before proceeding
+        """从YOLO格式标签文件加载标注数据"""
+        # 确保图像已正确加载
         if not self.canvas.pixmap or self.canvas.pixmap.isNull():
             QMessageBox.warning(self, tr("Error"), tr("Cannot load annotations: No valid image loaded"))
             return
+            
+        # 保存当前标签数量用于日志记录
+        original_box_count = len(self.canvas.boxes)
+        logger.info(f"加载标签前数量: {original_box_count}")
         
+        # 先读取文件内容，确认能正确解析后再清空现有标签
         try:
-            with open(label_path, 'r') as f:
-                lines = f.readlines()
+            if os.path.exists(label_path):
+                with open(label_path, 'r') as f:
+                    lines = f.readlines()
                 
+                # 初始化临时列表
+                temp_boxes = []
+                
+                # 原始图像尺寸
+                img_width = self.canvas.pixmap.width()
+                img_height = self.canvas.pixmap.height()
+                
+                # 解析每一行数据
                 for line in lines:
-                    parts = line.strip().split()
-                    if len(parts) >= 5:  # 至少有5个值（类别和边界框坐标）
+                    line = line.strip()
+                    if not line:  # 跳过空行
+                        continue
+                    
+                    parts = line.split()
+                    if len(parts) < 5:  # 至少需要类别和边界框坐标
+                        logger.warning(f"格式错误的标注行: {line}")
+                        continue
+                        
+                    try:
+                        # 解析YOLO格式数据
                         class_id = int(parts[0])
                         x_center = float(parts[1])
                         y_center = float(parts[2])
                         width = float(parts[3])
                         height = float(parts[4])
                         
-                        # Ensure class exists
-                        while class_id >= len(self.classes):
-                            self.classes.append(f"Class {len(self.classes)}")
-                        self.update_class_combo()
+                        # 转换为像素坐标
+                        x1 = (x_center - width / 2) * img_width
+                        y1 = (y_center - height / 2) * img_height
+                        x2 = (x_center + width / 2) * img_width
+                        y2 = (y_center + height / 2) * img_height
                         
-                        # Convert from YOLO format to pixel coordinates
-                        img_width = self.canvas.pixmap.width()
-                        img_height = self.canvas.pixmap.height()
-                        
-                        x1 = (x_center - width/2) * img_width
-                        y1 = (y_center - height/2) * img_height
-                        x2 = (x_center + width/2) * img_width
-                        y2 = (y_center + height/2) * img_height
-                        
+                        # 创建边界框对象
                         box = BoundingBox(x1, y1, x2, y2, class_id)
                         
-                        # 检查是否有特征点数据
-                        if len(parts) > 5 and (len(parts) - 5) % 2 == 0:
-                            # 特征点数据是成对的 x,y 坐标
-                            keypoints = []
-                            for i in range(5, len(parts), 2):
-                                if i + 1 < len(parts):
-                                    kp_x = float(parts[i]) * img_width   # 将归一化坐标转回像素坐标
-                                    kp_y = float(parts[i+1]) * img_height
-                                    keypoints.append([kp_x, kp_y])
+                        # 检查是否有关键点数据（每个点有x、y两个坐标值）
+                        if len(parts) > 5:
+                            keypoints_data = parts[5:]
+                            keypoints_count = len(keypoints_data) // 2
                             
-                            if keypoints:
-                                box.set_keypoints(np.array(keypoints))
+                            if keypoints_count > 0 and len(keypoints_data) % 2 == 0:
+                                keypoints = []
+                                
+                                # 解析关键点坐标
+                                for i in range(keypoints_count):
+                                    try:
+                                        kp_x = float(keypoints_data[i*2]) * img_width
+                                        kp_y = float(keypoints_data[i*2+1]) * img_height
+                                        keypoints.append([kp_x, kp_y])
+                                    except (ValueError, IndexError) as e:
+                                        logger.warning(f"解析关键点坐标时出错 #{i}: {str(e)}")
+                                
+                                # 设置特征点
+                                if keypoints:
+                                    box.set_keypoints(np.array(keypoints))
                         
-                        self.canvas.boxes.append(box)
+                        # 添加到临时列表
+                        temp_boxes.append(box)
+                        
+                    except ValueError as e:
+                        logger.warning(f"解析标注数据时出错: {str(e)}, 行: {line}")
                 
+                # 成功解析完成，现在更新画布的边界框列表
+                self.canvas.boxes = temp_boxes
                 self.update_box_list()
-                self.canvas.update()
+                logger.info(f"加载了 {len(temp_boxes)} 个边界框")
+                
+            else:
+                # 文件不存在，清空边界框
+                logger.warning(f"标注文件不存在: {label_path}")
+                self.canvas.boxes = []
+                self.update_box_list()
+                
         except Exception as e:
-            logger.error(f"加载标注文件失败: {str(e)}\n{traceback.format_exc()}")
+            logger.error(f"加载标注失败: {str(e)}")
+            logger.error(traceback.format_exc())
             QMessageBox.warning(self, tr("Error"), f"{tr('Failed to load annotations')}: {str(e)}")
+            
+        # 更新UI并触发重绘
+        self.canvas.update()
     
     def update_box_list(self):
         self.box_list.clear()
@@ -682,7 +724,22 @@ class YOLOLabelCreator(QMainWindow):
             if reply == QMessageBox.Yes:
                 index = self.box_list.row(selected_items[0])
                 if 0 <= index < len(self.canvas.boxes):
+                    # 记录删除前的标签数量
+                    original_count = len(self.canvas.boxes)
+                    
+                    # 获取将被删除的标签类别信息
+                    box_to_delete = self.canvas.boxes[index]
+                    class_name = self.get_class_name(box_to_delete.class_id)
+                    
+                    # 记录删除操作
+                    logger.info(f"删除标签: 索引 {index}，类别 '{class_name}'")
+                    
+                    # 执行删除操作
                     del self.canvas.boxes[index]
+                    
+                    # 记录删除后的标签数量
+                    logger.info(f"删除后标签数量: {len(self.canvas.boxes)}")
+                    
                     self.update_box_list()
                     self.canvas.update()
                     self.save_current()
@@ -710,6 +767,7 @@ class YOLOLabelCreator(QMainWindow):
     
     def prev_image(self):
         if self.current_image_index > 0:
+            # 不再自动保存，直接切换到上一张图像
             self.current_image_index -= 1
             self.image_list.setCurrentRow(self.current_image_index)
             image_path = os.path.join(self.current_folder, self.image_files[self.current_image_index])
@@ -717,6 +775,7 @@ class YOLOLabelCreator(QMainWindow):
     
     def next_image(self):
         if self.current_image_index < len(self.image_files) - 1:
+            # 不再自动保存，直接切换到下一张图像
             self.current_image_index += 1
             self.image_list.setCurrentRow(self.current_image_index)
             image_path = os.path.join(self.current_folder, self.image_files[self.current_image_index])
@@ -759,51 +818,98 @@ class YOLOLabelCreator(QMainWindow):
         QMessageBox.information(self, tr("Success"), tr("All annotations saved successfully"))
     
     def save_annotations(self, label_path):
-        # Check if pixmap is valid before proceeding
+        """
+        将当前标注保存为YOLO格式标签文件
+        
+        Args:
+            label_path (str): 标签文件保存路径
+            
+        Returns:
+            bool: 保存是否成功
+            
+        Note:
+            同时会更新classes.txt和data.yaml文件
+        """
+        # 确保图像已正确加载
         if not self.canvas.pixmap or self.canvas.pixmap.isNull():
             QMessageBox.warning(self, tr("Error"), tr("Cannot save annotations: No valid image loaded"))
             return False
+            
+        # 检查是否存在标签，如果不存在但原文件存在标签，则给出警告
+        if not self.canvas.boxes:
+            if os.path.exists(label_path):
+                try:
+                    with open(label_path, 'r') as f:
+                        lines = f.readlines()
+                        if len(lines) > 0:
+                            # 原文件有标签，但当前没有标签
+                            reply = QMessageBox.question(
+                                self, 
+                                tr("警告"), 
+                                tr("原标签文件包含{}个标注，但当前没有任何标签。确定要覆盖保存空标签文件吗？").format(len(lines)),
+                                QMessageBox.Yes | QMessageBox.No
+                            )
+                            if reply == QMessageBox.No:
+                                return False
+                except Exception:
+                    pass  # 如果读取失败，继续保存当前标签
+                
+            logger.warning(f"保存空标签文件: {label_path}")
             
         try:
             img_width = self.canvas.pixmap.width()
             img_height = self.canvas.pixmap.height()
             
-            # 保存到项目目录和图片目录
+            # 保存前记录即将保存的边界框数量
+            pre_save_box_count = len(self.canvas.boxes)
+            logger.info(f"即将保存的标签数量: {pre_save_box_count}")
+            
+            # 检查是否有边界框可以保存
+            if pre_save_box_count == 0:
+                logger.warning(f"注意：正在保存空标签文件 {label_path}")
+            
+            # 保存标签文件
             self._write_label_file(label_path, img_width, img_height)
             
-            # 保存类别名称到classes.txt（项目目录）
+            # 确认保存后标签数量未变化
+            post_save_box_count = len(self.canvas.boxes)
+            if pre_save_box_count != post_save_box_count:
+                logger.error(f"警告：保存前边界框数量 {pre_save_box_count} 与保存后数量 {post_save_box_count} 不一致")
+            
+            # 保存类别名称到classes.txt
             classes_path = os.path.join(os.path.dirname(label_path), "classes.txt")
             with open(classes_path, 'w') as f:
                 for class_name in self.classes:
                     f.write(f"{class_name}\n")
-                    
+            
+            # 记录保存的标签数量        
+            logger.info(f"成功保存标签文件: {label_path}，共 {post_save_box_count} 个标签")
+            
             return True
         except Exception as e:
             logger.error(f"Error saving annotations: {str(e)}")
             QMessageBox.warning(self, tr("Error"), f"{tr('Failed to save annotations')}: {str(e)}")
             return False
-
-    def update_data_yaml(self):
-        if not self.current_dir:
-            return
-        
-        yaml_path = os.path.join(self.current_dir, "data.yaml")
-        data = {
-            'train': '../train/images',
-            'val': '../valid/images',
-            'test': '../test/images',
-            'nc': len(self.classes),
-            'names': self.classes
-        }
-        try:
-            with open(yaml_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, default_flow_style=False)
-        except Exception as e:
-            logger.error(f"Failed to save data.yaml: {str(e)}")
-    
+            
     def _write_label_file(self, path, img_width, img_height):
-        """通用标签文件写入方法"""
+        """
+        将边界框数据写入YOLO格式标签文件
+        
+        Args:
+            path (str): 标签文件保存路径
+            img_width (int): 图像宽度
+            img_height (int): 图像高度
+            
+        Note:
+            YOLO格式：每行表示一个边界框，格式为 "class_id x_center y_center width height [keypoints...]"
+            所有坐标都是归一化的（0-1范围）
+        """
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # 记录即将写入的框数量
+        boxes_to_save = len(self.canvas.boxes)
+        logger.info(f"准备写入标签数量: {boxes_to_save}")
+        
         with open(path, 'w', encoding='utf-8') as f:
             for box in self.canvas.boxes:
                 yolo_box = box.to_yolo_format(img_width, img_height)
@@ -822,6 +928,24 @@ class YOLOLabelCreator(QMainWindow):
                 line += "\n"
                 f.write(line)
         self.update_data_yaml()
+
+    def update_data_yaml(self):
+        if not self.current_dir:
+            return
+        
+        yaml_path = os.path.join(self.current_dir, "data.yaml")
+        data = {
+            'train': '../train/images',
+            'val': '../valid/images',
+            'test': '../test/images',
+            'nc': len(self.classes),
+            'names': self.classes
+        }
+        try:
+            with open(yaml_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data, f, default_flow_style=False)
+        except Exception as e:
+            logger.error(f"Failed to save data.yaml: {str(e)}")
     
     # 添加模型选择方法
     def select_model(self):
@@ -875,9 +999,17 @@ class YOLOLabelCreator(QMainWindow):
             
             progress.setValue(70)
             
+            # 记录自动标注前的标签数量
+            original_count = len(self.canvas.boxes)
+            logger.info(f"自动标注前标签数量: {original_count}")
+            
             if boxes:
                 # 不再弹出确认对话框，直接添加预测的边界框，保留现有标注
                 self.canvas.boxes.extend(boxes)
+                # 记录添加后的标签数量
+                new_count = len(self.canvas.boxes)
+                logger.info(f"自动标注后标签数量: {new_count}，新增 {new_count - original_count} 个标签")
+                
                 self.update_box_list()
                 self.canvas.update()
                 
@@ -930,12 +1062,19 @@ class YOLOLabelCreator(QMainWindow):
                 self.image_list.setCurrentRow(i)
                 self.load_image(image_path)
                 
+                # 记录当前标签数量
+                original_count = len(self.canvas.boxes)
+                logger.info(f"批量自动标注 [{i+1}/{len(self.image_files)}] '{image_file}' - 初始标签数量: {original_count}")
+                
                 # 执行预测
                 boxes = self.yolo_predictor.predict(image_path)
                 
                 if boxes:
                     # 添加预测的边界框，保留现有标注
                     self.canvas.boxes.extend(boxes)
+                    new_count = len(self.canvas.boxes)
+                    logger.info(f"批量自动标注 - 添加后标签数量: {new_count}，新增 {new_count - original_count} 个标签")
+                    
                     self.update_box_list()
                     self.canvas.update()
                     
@@ -963,12 +1102,12 @@ class YOLOLabelCreator(QMainWindow):
 
     # 添加快捷键设置方法
     def setup_shortcuts(self):
-        """设置应用程序快捷键"""
-        # 保存当前
+        """设置键盘快捷键"""
+        # 保存标签
         save_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('save_current')), self)
         save_shortcut.activated.connect(self.save_current)
         
-        # 保存全部
+        # 保存所有标签
         save_all_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('save_all')), self)
         save_all_shortcut.activated.connect(self.save_all)
         
@@ -980,21 +1119,19 @@ class YOLOLabelCreator(QMainWindow):
         next_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('next_image')), self)
         next_shortcut.activated.connect(self.next_image)
         
-        # 删除选中框
+        # 删除选中的边界框
         delete_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('delete_box')), self)
         delete_shortcut.activated.connect(self.delete_selected_box)
         
-        # 放大
+        # 缩放控制
         zoom_in_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('zoom_in')), self)
         zoom_in_shortcut.activated.connect(self.canvas.zoom_in)
         
-        # 缩小
         zoom_out_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('zoom_out')), self)
         zoom_out_shortcut.activated.connect(self.canvas.zoom_out)
         
-        # 重置缩放
-        reset_zoom_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('reset_zoom')), self)
-        reset_zoom_shortcut.activated.connect(self.canvas.reset_zoom)
+        zoom_reset_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('reset_zoom')), self)
+        zoom_reset_shortcut.activated.connect(self.canvas.reset_zoom)
         
         # 打开目录
         open_dir_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('open_directory')), self)
@@ -1008,13 +1145,13 @@ class YOLOLabelCreator(QMainWindow):
         auto_label_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('auto_label')), self)
         auto_label_shortcut.activated.connect(self.auto_label_current)
         
-        # 批量标注快捷键
+        # 批量自动标注
         auto_label_all_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('auto_label_all')), self)
         auto_label_all_shortcut.activated.connect(self.auto_label_all)
-
-        # 特征点编辑模式快捷键
-        keypoint_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('toggle_keypoint_mode')), self)
-        keypoint_shortcut.activated.connect(self.toggle_keypoint_mode)
+        
+        # 切换特征点编辑模式
+        toggle_keypoint_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('toggle_keypoint_mode')), self)
+        toggle_keypoint_shortcut.activated.connect(self.toggle_keypoint_mode)
 
     def show_settings(self):
         """显示设置对话框"""
@@ -1034,44 +1171,60 @@ class YOLOLabelCreator(QMainWindow):
                 QMessageBox.warning(self, tr("错误"), f"{tr('打开训练器失败')}: {str(e)}")
 
     def open_model_settings(self):
-        """打开模型预测设置对话框"""
-        dialog = ModelSettingsDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            # 如果设置已保存，更新预测器的参数
-            from utils.config import Config
-            config = Config()
-            model_params = config.get_model_params()
+        """打开模型设置对话框"""
+        try:
+            # 获取当前模型参数
+            model_params = self.settings.get_model_params()
             
-            # 更新预测器参数
-            if self.yolo_predictor:
+            # 创建并显示对话框
+            dialog = ModelSettingsDialog(self, model_params, self.yolo_predictor.available_devices)
+            result = dialog.exec_()
+            
+            # 处理结果
+            if result == QDialog.Accepted:
+                # 从对话框获取更新的参数
+                new_params = dialog.get_updated_params()
+                
+                # 保存更新的参数
+                self.settings.save_model_params(new_params)
+                
+                # 更新预测器设置
                 self.yolo_predictor.set_params(
-                    conf_threshold=model_params.get("confidence_threshold", 0.5),
-                    iou_threshold=model_params.get("iou_threshold", 0.45),
-                    max_detections=model_params.get("max_detections", 100),
-                    device=model_params.get("device", "cpu")
+                    conf_threshold=new_params['confidence_threshold'],
+                    iou_threshold=new_params['iou_threshold'],
+                    max_detections=new_params['max_detections'],
+                    device=new_params['device']
                 )
                 
-                # 如果模型路径已设置且不同于当前路径，尝试加载新模型
-                model_path = model_params.get("model_path", "")
-                if model_path and model_path != self.model_path and os.path.exists(model_path):
-                    if self.yolo_predictor.load_model(model_path):
-                        self.model_path = model_path
-                        self.model_label.setText(os.path.basename(model_path))
-                        self.auto_label_button.setEnabled(True)
-                        self.auto_label_all_button.setEnabled(True)
-                        self.statusBar().showMessage(tr("模型已更新"), 3000)
-                # 如果模型路径相同但设备改变，重新加载模型
-                elif model_path and model_path == self.model_path and os.path.exists(model_path):
-                    if self.yolo_predictor.load_model(model_path):
-                        self.statusBar().showMessage(tr("模型在新设备上重新加载"), 3000)
-            
-            # 检查是否启用自动预测
-            if model_params.get("enable_auto_predict", False):
-                # 这里可以添加自动预测的逻辑
-                pass
+                # 如果选择了新模型，加载它
+                new_model_path = new_params.get('model_path')
+                if new_model_path and (not self.model_path or new_model_path != self.model_path):
+                    if os.path.exists(new_model_path):
+                        logger.info(f"加载新模型: {new_model_path}")
+                        if self.yolo_predictor.load_model(new_model_path):
+                            self.model_path = new_model_path
+                            self.auto_label_button.setEnabled(True)
+                            self.auto_label_all_button.setEnabled(True)
+                        else:
+                            # 如果加载失败，重置模型路径
+                            new_params['model_path'] = ""
+                            self.settings.save_model_params(new_params)
+                            self.auto_label_button.setEnabled(False)
+                            self.auto_label_all_button.setEnabled(False)
                 
-            self.statusBar().showMessage(tr("模型设置已更新"), 3000)
-            
+                # 更新自动预测按钮的状态
+                self.auto_label_button.setEnabled(bool(self.model_path))
+                self.auto_label_all_button.setEnabled(bool(self.model_path))
+                
+                # 如果启用了自动预测并且当前有图像，则立即进行预测
+                if new_params.get('enable_auto_predict') and self.canvas.pixmap:
+                    self.auto_label_current()
+                    
+        except Exception as e:
+            logger.error(f"打开模型设置对话框失败: {str(e)}")
+            logger.error(traceback.format_exc())
+            QMessageBox.warning(self, tr("Error"), f"{tr('Failed to open model settings')}: {str(e)}")
+
     def open_dataset_split(self):
         """打开数据集划分对话框"""
         try:

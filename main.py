@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # 导入自定义模块
 from ui.main_window import YOLOLabelCreator
 from utils.logger import setup_logger
-from utils.config import Config  # 导入配置模块
+from utils.settings import Settings
 from i18n import tr
 
 
@@ -40,8 +40,9 @@ if __name__ == "__main__":
         # 确保窗口样式正确
         app.setStyle("Fusion")  # 使用Fusion样式，通常兼容性更好
         
-        # 初始化配置
-        config = Config()
+        # 初始化设置
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        settings = Settings(app_dir)
         
         window = YOLOLabelCreator()
         # 确保窗口属性设置正确

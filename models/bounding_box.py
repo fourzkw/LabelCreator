@@ -13,17 +13,7 @@ class BoundingBox:
         self.keypoints = None  # 存储特征点数据
         
     def to_yolo_format(self, img_width, img_height):
-        """
-        将坐标转换为YOLO格式
-        
-        Args:
-            img_width (int): 图像原始宽度
-            img_height (int): 图像原始高度
-            
-        Returns:
-            list: [class_id, x_center, y_center, width, height] 格式的列表
-                  所有值已归一化到0-1范围
-        """
+        """将坐标转换为YOLO格式（归一化坐标）"""
         # 计算中心点坐标（归一化）
         x_center = (self.x1 + self.x2) / (2 * img_width)
         y_center = (self.y1 + self.y2) / (2 * img_height)
@@ -35,17 +25,7 @@ class BoundingBox:
         return [self.class_id, x_center, y_center, width, height]
         
     def contains_point(self, x, y, margin=5):
-        """
-        检查点是否在边界框内部
-        
-        Args:
-            x (float): 点的x坐标
-            y (float): 点的y坐标
-            margin (int): 边缘检测的容差像素，设置为0时检查点是否严格在边界框内
-            
-        Returns:
-            bool: 如果点在边界框内部则返回True
-        """
+        """检查点是否在边界框内部"""
         return (self.x1 + margin <= x <= self.x2 - margin and 
                 self.y1 + margin <= y <= self.y2 - margin)
     
@@ -53,11 +33,6 @@ class BoundingBox:
         """
         检查点是否在边界框的边缘上
         
-        Args:
-            x (float): 点的x坐标
-            y (float): 点的y坐标
-            margin (int): 边缘检测的容差像素
-            
         Returns:
             str: 返回边缘位置 ('left', 'right', 'top', 'bottom') 或 None
         """
@@ -75,11 +50,6 @@ class BoundingBox:
         """
         检查点是否在边界框的角点上
         
-        Args:
-            x (float): 点的x坐标
-            y (float): 点的y坐标
-            margin (int): 角点检测的容差像素
-            
         Returns:
             str: 返回角点位置 ('top-left', 'top-right', 'bottom-left', 'bottom-right') 或 None
         """
@@ -94,24 +64,11 @@ class BoundingBox:
         return None
     
     def set_keypoints(self, keypoints):
-        """设置特征点数据
-        
-        Args:
-            keypoints: numpy数组，格式为 [[x1, y1], [x2, y2], ...]
-        """
+        """设置特征点数据"""
         self.keypoints = keypoints
 
     def add_keypoint(self, x, y):
-        """
-        添加一个新的特征点到边界框
-        
-        Args:
-            x (float): 特征点的 x 坐标
-            y (float): 特征点的 y 坐标
-            
-        Returns:
-            bool: 是否成功添加特征点
-        """
+        """添加一个新的特征点到边界框"""
         # 确保坐标在边界框内，允许点位于边缘上
         if not (self.x1 <= x <= self.x2 and self.y1 <= y <= self.y2):
             return False

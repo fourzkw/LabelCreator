@@ -73,14 +73,18 @@ class ImageCanvas(QWidget):
         self.mouse_pos = None  # 当前鼠标位置
     def load_image(self, image_path):
         """
-        安全加载图像及关联标注文件，确保异常情况下不丢失已有数据
+        加载图像文件到画布
+        
+        该方法仅负责图像加载，标签的读取由MainWindow类负责。
+        加载过程中会保存当前状态，以便在出错时能够恢复。
         
         Args:
             image_path (str): 要加载的图像文件路径
             
         Raises:
             FileNotFoundError: 图像文件不存在时抛出
-            Exception: 图像加载失败时抛出
+            ValueError: 图像格式不支持时抛出
+            RuntimeError: 图像加载失败时抛出
         """
         self.image_path = image_path
         logger.info(f"开始加载图像: {image_path}")
@@ -90,7 +94,6 @@ class ImageCanvas(QWidget):
         previous_pixmap = self.pixmap.copy() if self.pixmap else None
         
         try:
-            # 第一阶段：加载图像文件 --------------------------------
             # 文件存在性检查
             if not os.path.exists(image_path):
                 logger.error(f"图像文件不存在: {image_path}")
@@ -107,94 +110,9 @@ class ImageCanvas(QWidget):
             if self.pixmap.isNull():
                 logger.error(f"QPixmap创建失败: {image_path}")
                 raise RuntimeError(tr("图像加载失败"))
-
-            # 第二阶段：加载标注文件 --------------------------------
-            new_boxes = []
+                
+            # 更新标签路径显示（但不读取标签，由MainWindow负责）
             label_path = self.parent.get_label_path(image_path)
-            
-            if os.path.exists(label_path):
-                logger.info(f"发现标注文件: {label_path}")
-                try:
-                    with open(label_path, 'r', encoding='utf-8') as f:
-                        line_number = 0
-                        for line in f:
-                            line_number += 1
-                            line = line.strip()
-                            if not line:
-                                continue
-
-                            try:
-                                parts = list(map(float, line.split()))
-                                if len(parts) < 5:  # 至少需要5个值（类别ID和边界框坐标）
-                                    raise ValueError("无效的字段数量")
-
-                                class_id, x_center, y_center, width, height = parts[:5]
-                                class_id = int(class_id)
-
-                                # 验证类别ID有效性
-                                if class_id < 0 or class_id >= len(self.parent.classes):
-                                    logger.warning(f"第{line_number}行: 无效的类别ID {class_id}")
-                                    class_id = 0  # 重置为默认类别
-
-                                # 验证坐标范围有效性
-                                if not (0 <= x_center <= 1 and 0 <= y_center <= 1 and 
-                                        0 <= width <= 1 and 0 <= height <= 1):
-                                    raise ValueError("坐标超出有效范围[0,1]")
-
-                                # 转换为原始像素坐标
-                                img_w = self.pixmap.width()
-                                img_h = self.pixmap.height()
-                                
-                                x1 = int((x_center - width/2) * img_w)
-                                y1 = int((y_center - height/2) * img_h)
-                                x2 = int((x_center + width/2) * img_w)
-                                y2 = int((y_center + height/2) * img_h)
-
-                                # 坐标边界保护
-                                x1 = max(0, min(x1, img_w))
-                                y1 = max(0, min(y1, img_h))
-                                x2 = max(0, min(x2, img_w))
-                                y2 = max(0, min(y2, img_h))
-
-                                bbox = BoundingBox(x1, y1, x2, y2, class_id)
-                                
-                                # 检查是否有特征点数据（每个特征点有x,y两个值）
-                                if len(parts) > 5 and (len(parts) - 5) % 2 == 0:
-                                    keypoints_count = (len(parts) - 5) // 2
-                                    keypoints = []
-                                    
-                                    for i in range(keypoints_count):
-                                        kp_x = parts[5 + i*2]
-                                        kp_y = parts[5 + i*2 + 1]
-                                        
-                                        # 验证特征点坐标范围
-                                        if 0 <= kp_x <= 1 and 0 <= kp_y <= 1:
-                                            # 转换为像素坐标
-                                            kp_x_px = int(kp_x * img_w)
-                                            kp_y_px = int(kp_y * img_h)
-                                            keypoints.append([kp_x_px, kp_y_px])
-                                    
-                                    if keypoints:
-                                        bbox.set_keypoints(np.array(keypoints))
-                                
-                                new_boxes.append(bbox)
-                                
-                            except Exception as e:
-                                logger.error(f"标注文件解析错误 ({label_path} 第{line_number}行): {str(e)}")
-                                continue
-
-                except UnicodeDecodeError:
-                    logger.error(f"标注文件编码错误: {label_path}")
-                    QMessageBox.warning(self.parent, tr("警告"), 
-                                    tr("标注文件编码错误，请使用UTF-8格式"))
-                except Exception as e:
-                    logger.error(f"加载标注文件失败: {str(e)}")
-            else:
-                logger.info(f"未找到关联标注文件: {label_path}")
-
-            # 第三阶段：提交更新 --------------------------------
-            self.boxes = new_boxes  # 仅在全部验证通过后更新
-            self.parent.update_box_list()
             self.parent.label_path_display.setText(
                 tr("标签路径：") + f"{label_path}" + 
                 (tr(" (不存在)") if not os.path.exists(label_path) else "")
@@ -220,7 +138,7 @@ class ImageCanvas(QWidget):
             # 资源清理
             if previous_pixmap:
                 del previous_pixmap
-                
+
     def _restore_previous_state(self, previous_pixmap, previous_boxes):
         """恢复到之前的状态"""
         self.pixmap = previous_pixmap

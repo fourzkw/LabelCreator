@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
 from PyQt5.QtCore import Qt
 import os
 import logging
-from utils.config import Config
+from utils.settings import Settings
 from i18n import tr
 
 logger = logging.getLogger('YOLOLabelCreator.ModelSettings')
@@ -13,10 +13,18 @@ logger = logging.getLogger('YOLOLabelCreator.ModelSettings')
 class ModelSettingsDialog(QDialog):
     """模型预测参数设置对话框"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, model_params=None, available_devices=None):
         super().__init__(parent)
-        self.config = Config()
-        self.model_params = self.config.get_model_params()
+        self.settings = Settings()
+        
+        # 如果没有提供模型参数，则从设置中读取
+        if model_params is None:
+            self.model_params = self.settings.get_model_params()
+        else:
+            self.model_params = model_params
+            
+        # 可用设备
+        self.available_devices = available_devices or ["cpu"]
         
         self.setWindowTitle(tr("模型预测设置"))
         self.setMinimumWidth(450)
@@ -117,9 +125,10 @@ class ModelSettingsDialog(QDialog):
         
         # 设备选择
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["cpu", "cuda"])
+        self.device_combo.addItems(self.available_devices)
         current_device = self.model_params.get("device", "cpu")
-        self.device_combo.setCurrentText(current_device)
+        if current_device in self.available_devices:
+            self.device_combo.setCurrentText(current_device)
         params_layout.addRow(tr("计算设备:"), self.device_combo)
         
         # 置信度阈值
@@ -203,7 +212,9 @@ class ModelSettingsDialog(QDialog):
     
     def reset_params(self):
         """重置为默认参数"""
-        default_params = self.config.reset_model_params()
+        default_params = self.settings.reset_model_params()
+        
+        # 更新界面控件值
         self.model_path_edit.setText(default_params.get("model_path", ""))
         self.conf_threshold.setValue(default_params.get("confidence_threshold", 0.5))
         self.iou_threshold.setValue(default_params.get("iou_threshold", 0.45))
@@ -246,7 +257,11 @@ class ModelSettingsDialog(QDialog):
     
     def save_params(self):
         """保存参数设置"""
-        params = {
+        self.accept()  # 先接受对话框，返回Accepted结果
+        
+    def get_updated_params(self):
+        """获取用户更新后的参数"""
+        return {
             "model_path": self.model_path_edit.text(),
             "confidence_threshold": self.conf_threshold.value(),
             "iou_threshold": self.iou_threshold.value(),
@@ -254,7 +269,6 @@ class ModelSettingsDialog(QDialog):
             "enable_auto_predict": self.auto_predict.isChecked(),
             "device": self.device_combo.currentText(),
             "model_version": self.get_model_version(),
-            "model_format": self.get_model_format()
+            "model_format": self.get_model_format(),
+            "keypoints_number": self.keypoints_spinbox.value()
         }
-        self.config.save_model_params(params)
-        self.accept()

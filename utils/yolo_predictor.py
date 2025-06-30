@@ -17,6 +17,13 @@ except ImportError:
 logger = logging.getLogger('YOLOLabelCreator.YOLOPredictor')
 
 class YOLOPredictor:
+    """
+    YOLO模型预测器类
+    
+    用于加载YOLO模型并对图像进行目标检测预测。
+    支持YOLOv8和ONNX格式的模型。
+    """
+    
     def __init__(self):
         self.model = None
         self.conf_threshold = 0.5
@@ -88,9 +95,9 @@ class YOLOPredictor:
                 logger.info("YOLOv8模型加载成功")
                 return True
                 
-            # YOLOv5 模型 - 待实现
+            # 不支持的模型类型
             else:
-                logger.error("YOLOv5 模型加载功能尚未实现")
+                logger.error("不支持的模型类型或缺少必要依赖")
                 logger.error("请使用 ONNX 格式或安装 ultralytics 包使用 YOLOv8")
                 return False
                 
@@ -100,7 +107,15 @@ class YOLOPredictor:
             return False
     
     def predict(self, image_path):
-        """对图像进行预测"""
+        """
+        对图像进行目标检测预测
+        
+        Args:
+            image_path (str): 图像文件路径
+            
+        Returns:
+            list: 检测到的边界框列表，每个边界框为BoundingBox对象
+        """
         if self.model is None:
             logger.error("模型未加载")
             return []
@@ -125,11 +140,6 @@ class YOLOPredictor:
             logger.error(f"预测失败: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             return []
-    
-    def _predict_yolov5(self, image_path):
-        """使用YOLOv5模型预测 - 待实现"""
-        logger.error("YOLOv5 预测功能尚未实现")
-        return []
     
     def _predict_yolov8(self, image_path):
         """使用YOLOv8模型预测"""

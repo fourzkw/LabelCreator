@@ -303,28 +303,7 @@ class DatasetSplitDialog(QDialog):
                 if progress.wasCanceled():
                     break
                 
-                img_file = os.path.basename(img_path)
-                label_file = os.path.basename(label_path)
-                
-                # 复制图像
-                dest_img_path = os.path.join(output_path, "train", "images", img_file)
-                try:
-                    shutil.copy2(img_path, dest_img_path)
-                except Exception as e:
-                    logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
-                    continue
-                
-                # 复制标签 - 使用读写方式确保完整复制特征点数据
-                dest_label_path = os.path.join(output_path, "train", "labels", label_file)
-                try:
-                    # 使用读写模式复制文件内容，而不是直接复制文件
-                    with open(label_path, 'r', encoding='utf-8') as src_file:
-                        content = src_file.read()
-                        
-                    with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
-                        dst_file.write(content)
-                except Exception as e:
-                    logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
+                if not self._copy_file_pair(img_path, label_path, output_path, "train"):
                     continue
                 
                 processed += 1
@@ -335,28 +314,7 @@ class DatasetSplitDialog(QDialog):
                 if progress.wasCanceled():
                     break
                 
-                img_file = os.path.basename(img_path)
-                label_file = os.path.basename(label_path)
-                
-                # 复制图像
-                dest_img_path = os.path.join(output_path, "val", "images", img_file)
-                try:
-                    shutil.copy2(img_path, dest_img_path)
-                except Exception as e:
-                    logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
-                    continue
-                
-                # 复制标签 - 使用读写方式确保完整复制特征点数据
-                dest_label_path = os.path.join(output_path, "val", "labels", label_file)
-                try:
-                    # 使用读写模式复制文件内容，而不是直接复制文件
-                    with open(label_path, 'r', encoding='utf-8') as src_file:
-                        content = src_file.read()
-                        
-                    with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
-                        dst_file.write(content)
-                except Exception as e:
-                    logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
+                if not self._copy_file_pair(img_path, label_path, output_path, "val"):
                     continue
                 
                 processed += 1
@@ -367,28 +325,7 @@ class DatasetSplitDialog(QDialog):
                 if progress.wasCanceled():
                     break
                 
-                img_file = os.path.basename(img_path)
-                label_file = os.path.basename(label_path)
-                
-                # 复制图像
-                dest_img_path = os.path.join(output_path, "test", "images", img_file)
-                try:
-                    shutil.copy2(img_path, dest_img_path)
-                except Exception as e:
-                    logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
-                    continue
-                
-                # 复制标签 - 使用读写方式确保完整复制特征点数据
-                dest_label_path = os.path.join(output_path, "test", "labels", label_file)
-                try:
-                    # 使用读写模式复制文件内容，而不是直接复制文件
-                    with open(label_path, 'r', encoding='utf-8') as src_file:
-                        content = src_file.read()
-                        
-                    with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
-                        dst_file.write(content)
-                except Exception as e:
-                    logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
+                if not self._copy_file_pair(img_path, label_path, output_path, "test"):
                     continue
                 
                 processed += 1
@@ -515,3 +452,42 @@ class DatasetSplitDialog(QDialog):
             logger.error(f"划分数据集时出错: {str(e)}")
             logger.exception("详细错误信息")  # 添加详细的异常堆栈信息
             QMessageBox.critical(self, tr("错误"), tr(f"划分数据集时出错: {str(e)}"))
+    
+    def _copy_file_pair(self, img_path, label_path, output_path, split_type):
+        """
+        复制图像和标签文件对到指定的输出目录
+        
+        Args:
+            img_path (str): 源图像文件路径
+            label_path (str): 源标签文件路径
+            output_path (str): 输出根目录
+            split_type (str): 数据集类型 ("train", "val", "test")
+            
+        Returns:
+            bool: 复制是否成功
+        """
+        img_file = os.path.basename(img_path)
+        label_file = os.path.basename(label_path)
+        
+        # 复制图像
+        dest_img_path = os.path.join(output_path, split_type, "images", img_file)
+        try:
+            shutil.copy2(img_path, dest_img_path)
+        except Exception as e:
+            logger.error(f"复制图像文件失败: {img_path} -> {dest_img_path}, 错误: {str(e)}")
+            return False
+        
+        # 复制标签 - 使用读写方式确保完整复制特征点数据
+        dest_label_path = os.path.join(output_path, split_type, "labels", label_file)
+        try:
+            # 使用读写模式复制文件内容，而不是直接复制文件
+            with open(label_path, 'r', encoding='utf-8') as src_file:
+                content = src_file.read()
+                
+            with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
+                dst_file.write(content)
+        except Exception as e:
+            logger.error(f"复制标签文件失败: {label_path} -> {dest_label_path}, 错误: {str(e)}")
+            return False
+            
+        return True
