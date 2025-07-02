@@ -153,7 +153,11 @@ class ModelSettingsDialog(QDialog):
         
         # 自动预测
         self.auto_predict = QCheckBox()
-        self.auto_predict.setChecked(self.model_params.get("enable_auto_predict", False))
+        auto_predict_value = self.model_params.get("enable_auto_predict", False)
+        # 确保是布尔值，而非字符串
+        if isinstance(auto_predict_value, str):
+            auto_predict_value = auto_predict_value.lower() == 'true'
+        self.auto_predict.setChecked(auto_predict_value)
         params_layout.addRow(tr("启用自动预测:"), self.auto_predict)
         
         # 特征点数量
@@ -219,7 +223,13 @@ class ModelSettingsDialog(QDialog):
         self.conf_threshold.setValue(default_params.get("confidence_threshold", 0.5))
         self.iou_threshold.setValue(default_params.get("iou_threshold", 0.45))
         self.max_detections.setValue(default_params.get("max_detections", 100))
-        self.auto_predict.setChecked(default_params.get("enable_auto_predict", False))
+        
+        # 确保auto_predict值为布尔型
+        auto_predict_value = default_params.get("enable_auto_predict", False)
+        if isinstance(auto_predict_value, str):
+            auto_predict_value = auto_predict_value.lower() == 'true'
+        self.auto_predict.setChecked(auto_predict_value)
+        
         self.device_combo.setCurrentText(default_params.get("device", "cpu"))
         self.keypoints_spinbox.setValue(default_params.get("keypoints_number", 0))
         

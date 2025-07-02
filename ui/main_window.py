@@ -22,6 +22,8 @@ from ui.model_settings_dialog import ModelSettingsDialog
 from training.trainer_dialog import YoloTrainerDialog
 from ui.dataset_split_dialog import DatasetSplitDialog
 from ui.class_manager_dialog import ClassManagerDialog
+from ui.model_converter_dialog import ModelConverterDialog
+from ui.model_inspector_dialog import ModelInspectorDialog
 
 # 获取日志记录器
 logger = logging.getLogger('YOLOLabelCreator.MainWindow')
@@ -396,6 +398,18 @@ class YOLOLabelCreator(QMainWindow):
         dataset_split_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         dataset_split_action.triggered.connect(self.open_dataset_split)
         tools_menu.addAction(dataset_split_action)
+        
+        # 添加模型转换菜单项
+        model_converter_action = QAction(tr("PT模型转ONNX"), self)
+        model_converter_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogContentsView))
+        model_converter_action.triggered.connect(self.open_model_converter)
+        tools_menu.addAction(model_converter_action)
+        
+        # 添加模型结构查看器菜单项
+        model_inspector_action = QAction(tr("模型结构查看器"), self)
+        model_inspector_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
+        model_inspector_action.triggered.connect(self.open_model_inspector)
+        tools_menu.addAction(model_inspector_action)
         
         # 添加训练菜单
         train_menu = menubar.addMenu(tr("训练"))
@@ -1302,3 +1316,23 @@ class YOLOLabelCreator(QMainWindow):
         else:
             self.guide_lines_button.setText(tr("显示辅助线"))
             self.statusBar().showMessage(tr("辅助线已禁用"), 2000)
+
+    def open_model_converter(self):
+        """打开模型转换对话框"""
+        try:
+            converter_dialog = ModelConverterDialog(self)
+            converter_dialog.exec_()
+        except Exception as e:
+            logger.error(f"打开模型转换对话框失败: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            QMessageBox.warning(self, tr("错误"), f"{tr('打开模型转换对话框失败')}: {str(e)}")
+
+    def open_model_inspector(self):
+        """打开模型结构查看器对话框"""
+        try:
+            inspector_dialog = ModelInspectorDialog(self)
+            inspector_dialog.exec_()
+        except Exception as e:
+            logger.error(f"打开模型结构查看器失败: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            QMessageBox.warning(self, tr("错误"), f"{tr('打开模型结构查看器失败')}: {str(e)}")

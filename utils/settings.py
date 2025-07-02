@@ -116,23 +116,37 @@ class Settings:
             "confidence_threshold": float(self.qsettings.value("model/confidence_threshold", 0.5)),
             "iou_threshold": float(self.qsettings.value("model/iou_threshold", 0.45)),
             "max_detections": int(self.qsettings.value("model/max_detections", 100)),
-            "enable_auto_predict": self.qsettings.value("model/enable_auto_predict", False),
+            "enable_auto_predict": self._to_bool(self.qsettings.value("model/enable_auto_predict", False)),
             "device": self.qsettings.value("model/device", "cpu"),
             "model_version": self.qsettings.value("model/model_version", "yolov8"),
-            "model_format": self.qsettings.value("model/model_format", "pt")
+            "model_format": self.qsettings.value("model/model_format", "pt"),
+            "keypoints_number": int(self.qsettings.value("model/keypoints_number", 0))
         }
         return params
+    
+    def _to_bool(self, value):
+        """将各种类型的值转换为布尔值"""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() == 'true'
+        # 对于数字，0被视为False，其他为True
+        if isinstance(value, (int, float)):
+            return bool(value)
+        # 默认返回False
+        return False
     
     def save_model_params(self, params):
         """保存模型参数"""
         self.qsettings.setValue("model/model_path", params.get("model_path", ""))
-        self.qsettings.setValue("model/confidence_threshold", params.get("confidence_threshold", 0.5))
-        self.qsettings.setValue("model/iou_threshold", params.get("iou_threshold", 0.45))
-        self.qsettings.setValue("model/max_detections", params.get("max_detections", 100))
-        self.qsettings.setValue("model/enable_auto_predict", params.get("enable_auto_predict", False))
+        self.qsettings.setValue("model/confidence_threshold", float(params.get("confidence_threshold", 0.5)))
+        self.qsettings.setValue("model/iou_threshold", float(params.get("iou_threshold", 0.45)))
+        self.qsettings.setValue("model/max_detections", int(params.get("max_detections", 100)))
+        self.qsettings.setValue("model/enable_auto_predict", bool(params.get("enable_auto_predict", False)))
         self.qsettings.setValue("model/device", params.get("device", "cpu"))
         self.qsettings.setValue("model/model_version", params.get("model_version", "yolov8"))
         self.qsettings.setValue("model/model_format", params.get("model_format", "pt"))
+        self.qsettings.setValue("model/keypoints_number", int(params.get("keypoints_number", 0)))
         self.qsettings.sync()
         return True
     
