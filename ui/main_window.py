@@ -393,6 +393,12 @@ class YOLOLabelCreator(QMainWindow):
         # 添加工具菜单
         tools_menu = menubar.addMenu(tr("工具"))
         
+        # 添加扫描标签更新配置菜单项
+        scan_labels_action = QAction(tr("扫描标签更新配置"), self)
+        scan_labels_action.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        scan_labels_action.triggered.connect(self.reload_all_labels_and_update_config)
+        tools_menu.addAction(scan_labels_action)
+        
         # 添加数据集划分菜单项
         dataset_split_action = QAction(tr("数据集划分"), self)
         dataset_split_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
@@ -460,6 +466,17 @@ class YOLOLabelCreator(QMainWindow):
                 self.classes = ["Default"]
                 logger.warning("使用默认标签类别")
             self.update_class_combo()
+            
+            # 添加询问是否扫描所有标签更新配置
+            reply = QMessageBox.question(
+                self, 
+                tr("扫描标签"), 
+                tr("是否扫描目录中所有标签文件并更新配置?"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                self.reload_all_labels_and_update_config()
     
     def populate_folder_tree(self):
         """填充文件夹树视图"""
@@ -1336,3 +1353,128 @@ class YOLOLabelCreator(QMainWindow):
             logger.error(f"打开模型结构查看器失败: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             QMessageBox.warning(self, tr("错误"), f"{tr('打开模型结构查看器失败')}: {str(e)}")
+            
+    def reload_all_labels_and_update_config(self):
+        """
+        重新加载所有标签文件并更新配置
+        
+        此方法会扫描数据集中所有标签文件，收集所有使用的类别ID，
+        并更新data.yaml和classes.txt文件
+        """
+        if not self.current_dir:
+            QMessageBox.warning(self, tr("警告"), tr("请先选择数据集文件夹"))
+            return False
+            
+        try:
+            # 创建进度对话框
+            from PyQt5.QtWidgets import QProgressDialog
+            progress = QProgressDialog(tr("正在扫描标签文件..."), tr("取消"), 0, 100, self)
+            progress.setWindowTitle(tr("扫描标签"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setValue(0)
+            progress.show()
+            QApplication.processEvents()
+            
+            # 用于收集所有类别的字典
+            class_ids = set()
+            
+            # 扫描所有子文件夹
+            total_labels = 0
+            progress.setValue(10)
+            
+            # 遍历数据集目录树
+            for root, dirs, files in os.walk(self.current_dir):
+                if progress.wasCanceled():
+                    break
+                
+                # 寻找labels目录
+                if os.path.basename(root) == "labels":
+                    parent_dir = os.path.dirname(root)
+                    
+                    # 更新进度条信息
+                    relative_path = os.path.relpath(root, self.current_dir)
+                    progress.setLabelText(tr(f"扫描: {relative_path}"))
+                    
+                    # 扫描所有标签文件
+                    label_files = [f for f in files if f.endswith('.txt')]
+                    total_labels += len(label_files)
+                    
+                    # 读取每个标签文件
+                    for i, label_file in enumerate(label_files):
+                        if i % 10 == 0:  # 每处理10个文件更新一次进度
+                            progress_val = 10 + min(80, int(80 * i / max(1, len(label_files))))
+                            progress.setValue(progress_val)
+                            QApplication.processEvents()
+                            
+                        if progress.wasCanceled():
+                            break
+                            
+                        label_path = os.path.join(root, label_file)
+                        try:
+                            with open(label_path, 'r') as f:
+                                for line in f:
+                                    if line.strip():
+                                        parts = line.strip().split()
+                                        if parts:
+                                            try:
+                                                class_id = int(parts[0])
+                                                class_ids.add(class_id)
+                                            except ValueError:
+                                                logger.warning(f"标签文件 {label_path} 中的类别ID无效: {parts[0]}")
+                        except Exception as e:
+                            logger.error(f"读取标签文件 {label_path} 时出错: {str(e)}")
+            
+            progress.setValue(90)
+            
+            # 检查是否找到了标签文件和类别
+            if total_labels == 0:
+                QMessageBox.information(self, tr("信息"), tr("未找到任何标签文件"))
+                return False
+                
+            if not class_ids:
+                QMessageBox.information(self, tr("信息"), tr(f"扫描了 {total_labels} 个标签文件，但未找到有效的类别ID"))
+                return False
+                
+            # 找到了类别ID，但类别名称可能不足或不匹配
+            max_class_id = max(class_ids)
+            
+            # 确保类别列表长度足够
+            while len(self.classes) <= max_class_id:
+                new_class = f"Class_{len(self.classes)}"
+                self.classes.append(new_class)
+                
+            # 更新类别下拉框
+            self.update_class_combo()
+            
+            # 更新data.yaml文件
+            self.update_data_yaml()
+            
+            # 更新classes.txt文件
+            labels_dirs = []
+            for root, dirs, files in os.walk(self.current_dir):
+                if os.path.basename(root) == "labels":
+                    labels_dirs.append(root)
+                    
+            for labels_dir in labels_dirs:
+                classes_path = os.path.join(labels_dir, "classes.txt")
+                try:
+                    with open(classes_path, 'w', encoding='utf-8') as f:
+                        for class_name in self.classes:
+                            f.write(f"{class_name}\n")
+                    logger.info(f"已更新类别文件: {classes_path}")
+                except Exception as e:
+                    logger.error(f"更新类别文件失败: {str(e)}")
+            
+            progress.setValue(100)
+            QMessageBox.information(
+                self, 
+                tr("完成"), 
+                tr(f"已扫描 {total_labels} 个标签文件\n找到 {len(class_ids)} 个不同的类别ID\n类别列表已更新为 {len(self.classes)} 个类别")
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(f"扫描标签文件失败: {str(e)}")
+            logger.error(traceback.format_exc())
+            QMessageBox.warning(self, tr("错误"), tr(f"扫描标签文件失败: {str(e)}"))
+            return False
