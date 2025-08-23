@@ -15,7 +15,7 @@ class ConversionThread(QThread):
     """Thread for running model conversion in background"""
     conversion_complete = pyqtSignal(bool, str)
     
-    def __init__(self, input_path, output_path, img_size, simplify, opset, half):
+    def __init__(self, input_path, output_path, img_size, simplify, opset, half, dynamic, do_constant_folding):
         super().__init__()
         self.input_path = input_path
         self.output_path = output_path
@@ -23,6 +23,8 @@ class ConversionThread(QThread):
         self.simplify = simplify
         self.opset = opset
         self.half = half
+        self.dynamic = dynamic
+        self.do_constant_folding = do_constant_folding
     
     def run(self):
         """Run conversion process in background"""
@@ -32,7 +34,9 @@ class ConversionThread(QThread):
             self.img_size,
             self.simplify,
             self.opset,
-            self.half
+            self.half,
+            self.dynamic,
+            self.do_constant_folding
         )
         self.conversion_complete.emit(success, message)
 
@@ -115,6 +119,18 @@ class ModelConverterDialog(QDialog):
         self.half_checkbox.setChecked(False)
         params_layout.addRow("", self.half_checkbox)
         
+        # Dynamic axes checkbox
+        self.dynamic_checkbox = QCheckBox(tr("Dynamic Axes"))
+        self.dynamic_checkbox.setChecked(False)
+        self.dynamic_checkbox.setToolTip(tr("Enable dynamic axes for variable input sizes"))
+        params_layout.addRow("", self.dynamic_checkbox)
+        
+        # Constant folding checkbox
+        self.constant_folding_checkbox = QCheckBox(tr("Constant Folding"))
+        self.constant_folding_checkbox.setChecked(True)
+        self.constant_folding_checkbox.setToolTip(tr("Apply constant folding optimization"))
+        params_layout.addRow("", self.constant_folding_checkbox)
+        
         params_group.setLayout(params_layout)
         layout.addWidget(params_group)
         
@@ -184,6 +200,8 @@ class ModelConverterDialog(QDialog):
         simplify = self.simplify_checkbox.isChecked()
         opset = int(self.opset_combo.currentText())
         half = self.half_checkbox.isChecked()
+        dynamic = self.dynamic_checkbox.isChecked()
+        do_constant_folding = self.constant_folding_checkbox.isChecked()
         
         # Create progress dialog
         self.progress = QProgressDialog(
@@ -202,7 +220,7 @@ class ModelConverterDialog(QDialog):
         
         # Create and start conversion thread
         self.conversion_thread = ConversionThread(
-            input_path, output_path, img_size, simplify, opset, half
+            input_path, output_path, img_size, simplify, opset, half, dynamic, do_constant_folding
         )
         self.conversion_thread.conversion_complete.connect(self.on_conversion_complete)
         self.conversion_thread.start()

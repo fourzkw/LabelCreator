@@ -5,6 +5,10 @@ Pillow>=8.0.0
 #torchvision
 numpy>=1.19.0
 pandas>=1.1.0
+onnx>=1.12.0,<1.18.0
+onnxslim
+onnxruntime
+onnxruntime-gpu
 
 # YOLOv8训练相关依赖
 ultralytics>=8.0.0
