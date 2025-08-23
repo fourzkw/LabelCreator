@@ -343,13 +343,23 @@ class YoloTrainerUI(QMainWindow):
             # 使用subprocess获取conda环境列表
             result = subprocess.run(['conda', 'env', 'list', '--json'], 
                                    capture_output=True, text=True, check=True)
-            env_data = json.loads(result.stdout)
             
-            # 提取环境名称
-            envs = [os.path.basename(env) for env in env_data['envs']]
-            self.conda_env_combo.addItems(envs)
+            # 尝试找到JSON内容的实际起始和结束位置
+            stdout = result.stdout
+            json_start = stdout.find('{')
+            json_end = stdout.rfind('}') + 1
             
-            self.log_message(f"找到 {len(envs)} 个Conda环境")
+            if json_start >= 0 and json_end > json_start:
+                json_content = stdout[json_start:json_end]
+                env_data = json.loads(json_content)
+                
+                # 提取环境名称
+                envs = [os.path.basename(env) for env in env_data['envs']]
+                self.conda_env_combo.addItems(envs)
+                
+                self.log_message(f"找到 {len(envs)} 个Conda环境")
+            else:
+                self.log_message("无法解析Conda环境列表")
         except Exception as e:
             self.log_message(f"获取Conda环境失败: {str(e)}")
     
@@ -498,8 +508,8 @@ class YoloTrainerUI(QMainWindow):
             # 获取训练脚本的绝对路径
             script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "train_yolo.py")
                     
-            # 构建命令
-            cmd = f'start cmd.exe /k "conda activate {conda_env} && python "{script_path}""'
+            # 构建命令，先初始化conda，然后激活环境并运行脚本
+            cmd = f'start cmd.exe /k "conda init cmd.exe && conda activate {conda_env} && python "{script_path}""'
                     
             # 执行命令
             subprocess.Popen(cmd, shell=True)
