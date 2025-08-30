@@ -20,9 +20,7 @@ class ModelConverter:
         img_size=(640, 640),
         simplify=True,
         opset=12,
-        half=False,
-        dynamic=False,
-        do_constant_folding=True
+        half=False
     ):
         """
         Convert PyTorch model to ONNX format
@@ -34,8 +32,6 @@ class ModelConverter:
             simplify (bool, optional): Whether to simplify the ONNX model. Defaults to True.
             opset (int, optional): ONNX opset version. Defaults to 12.
             half (bool, optional): Whether to use half precision (FP16). Defaults to False.
-            dynamic (bool, optional): Whether to use dynamic axes. Defaults to False.
-            do_constant_folding (bool, optional): Whether to apply constant folding optimization. Defaults to True.
             
         Returns:
             bool: True if conversion was successful, False otherwise
@@ -58,15 +54,7 @@ class ModelConverter:
             model = YOLO(input_path)
             
             # Export the model to ONNX format
-            model.export(
-                format='onnx', 
-                imgsz=img_size, 
-                simplify=simplify, 
-                opset=opset, 
-                half=half,
-                dynamic=dynamic,
-                do_constant_folding=do_constant_folding
-            )
+            model.export(format='onnx', imgsz=img_size, simplify=simplify, opset=opset, half=half)
             
             # The YOLO export function saves the model in the same directory as the input
             # with a .onnx extension. Let's move it if necessary.
