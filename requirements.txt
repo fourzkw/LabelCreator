@@ -6,9 +6,9 @@ Pillow>=8.0.0
 numpy>=1.19.0
 pandas>=1.1.0
 onnx==1.19.0
-onnxslim
-onnxruntime
-onnxruntime-gpu
+onnxslim==0.1.68
+onnxruntime==1.19.2
+onnxruntime-gpu==1.19.2
 
 # YOLOv8训练相关依赖
 ultralytics>=8.0.0
