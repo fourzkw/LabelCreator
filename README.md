@@ -655,7 +655,8 @@ pip install onnx==1.19.0 onnxruntime==1.19.2
 ### 开发环境设置
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/label-creator.git
+git clone https://gitee.com/fourzkw/label-creator.git
+# git clone https://github.com/fourzkw/LabelCreator.git
 cd label-creator
 
 # 创建虚拟环境
@@ -712,9 +713,7 @@ SOFTWARE.
 
 ## 联系方式 (Contact)
 
-- Email: your-email@example.com
-- Issues: [GitHub Issues](https://github.com/your-repo/label-creator/issues)
-- Documentation: [Wiki](https://github.com/your-repo/label-creator/wiki)
+- Email: 864769071@qq.com
 
 ---
 
