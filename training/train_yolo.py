@@ -3,8 +3,13 @@ import json
 import argparse
 from ultralytics import YOLO
 
-def load_settings(settings_path="yolo_train_settings.json"):
+def load_settings(settings_path=None):
     """从JSON文件加载训练设置"""
+    # 如果没有指定路径，使用默认的config目录下的配置文件
+    if settings_path is None:
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        settings_path = os.path.join(script_dir, "config", "yolo_train_settings.json")
+    
     try:
         with open(settings_path, "r", encoding="utf-8") as f:
             settings = json.load(f)
@@ -28,7 +33,9 @@ def print_settings(settings):
     if settings.get('use_custom_model', False) and settings.get('custom_model_path', ''):
         print(f"  使用自定义预训练模型: {settings['custom_model_path']}")
     else:
-        print(f"  模型类型: {settings['model_type']}")
+        print(f"  模型版本: {settings.get('model_version', 'YOLOv8')}")
+        print(f"  模型类别: {settings.get('model_category', '普通检测模型')}")
+        print(f"  模型大小: {settings['model_type']}")
         print(f"  使用预训练权重: {settings['pretrained']}")
     
     print(f"  训练轮数: {settings['epochs']}")
@@ -50,22 +57,25 @@ def print_settings(settings):
     print(f"  设备: {settings['device'] or '默认'}")
     print(f"  余弦学习率调度: {settings['cos_lr']}")
     print(f"  缓存图像: {settings['cache']}")
-    
-    # 特征点设置
-    if settings.get('enable_keypoints', False):
-        print(f"\n特征点设置:")
-        print(f"  启用特征点检测: {settings.get('enable_keypoints', False)}")
-        print(f"  任务类型: pose (姿态检测)")
     print("=" * 50 + "\n")
 
 def train_yolo(settings):
     """使用设置训练YOLOv8模型"""
     try:
-        # 先确定任务类型
+        # 获取项目根目录
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pretrained_models_dir = os.path.join(script_dir, "pretrained_models")
+        
+        # 根据模型类别确定任务类型
+        model_category = settings.get('model_category', '普通检测模型')
         task = "detect"  # 默认任务类型
-        if settings.get('enable_keypoints', False):
+        
+        if model_category == "yolo-pose模型":
             task = "pose"
-            print(f"启用特征点检测训练，使用pose任务类型")
+            print(f"使用姿态检测模型，任务类型: pose")
+        else:
+            task = "detect"
+            print(f"使用普通检测模型，任务类型: detect")
 
         # 构建模型
         if settings.get('use_custom_model', False) and settings.get('custom_model_path', ''):
@@ -77,14 +87,22 @@ def train_yolo(settings):
             # 使用标准模型
             model_name = settings['model_type']
             
-            # 根据任务类型选择模型
-            if task == "pose":
+            # 根据模型类别选择模型后缀
+            if model_category == "yolo-pose模型":
                 model_name = f"{model_name}-pose"
                 print(f"选择姿态检测模型: {model_name}")
                 
             if settings['pretrained']:
-                # 使用预训练模型
-                model = YOLO(f"{model_name}.pt")
+                # 使用预训练模型 - 优先从本地pretrained_models目录加载
+                local_model_path = os.path.join(pretrained_models_dir, f"{model_name}.pt")
+                if os.path.exists(local_model_path):
+                    print(f"从本地加载预训练模型: {local_model_path}")
+                    model = YOLO(local_model_path)
+                else:
+                    # 如果本地不存在，使用模型名称（ultralytics会自动下载）
+                    print(f"本地未找到模型，将使用 ultralytics 自动下载: {model_name}.pt")
+                    print(f"提示: 可将预训练模型放置在 {pretrained_models_dir} 目录以避免下载")
+                    model = YOLO(f"{model_name}.pt")
             else:
                 # 从头开始训练
                 model = YOLO(f"{model_name}.yaml")
@@ -136,7 +154,7 @@ def train_yolo(settings):
         print("\n开始训练...\n")
         
         # 确保数据集YAML格式正确
-        if task == "pose" and settings.get('enable_keypoints', False):
+        if task == "pose":
             print("注意：使用姿态检测(pose)任务训练需要特殊格式的数据集YAML文件！")
             print("数据集YAML必须包含关键点(keypoints)定义和正确的标注格式。")
             print("详情请参考：https://docs.ultralytics.com/datasets/keypoints/")
@@ -150,8 +168,8 @@ def train_yolo(settings):
     except Exception as e:
         print(f"训练过程中出错: {str(e)}")
 
-def main(settings_path="yolo_train_settings.json"):
-    print("YOLOv8 训练脚本启动")
+def main(settings_path=None):
+    print("YOLO模型训练脚本启动")
     
     # 加载设置
     settings = load_settings(settings_path)

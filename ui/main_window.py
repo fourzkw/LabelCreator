@@ -420,17 +420,14 @@ class YOLOLabelCreator(QMainWindow):
         # 添加训练菜单
         train_menu = menubar.addMenu(tr("训练"))
         
-        # 添加YOLOv8训练器动作
-        train_yolo_action = QAction(tr("YOLOv8训练器"), self)
+        # 添加YOLO模型训练器动作
+        train_yolo_action = QAction(tr("YOLO模型训练器"), self)
         train_yolo_action.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
         train_yolo_action.triggered.connect(self.open_yolo_trainer)
         train_menu.addAction(train_yolo_action)
         
         # 添加状态栏
         self.statusBar().showMessage(tr("Ready"))
-
-    def get_project_dir(self):
-        return self.current_dir  # 即用户选择的目录
 
     def load_classes_from_yaml(self):
         if not self.current_dir:
@@ -978,29 +975,6 @@ class YOLOLabelCreator(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to save data.yaml: {str(e)}")
     
-    # 添加模型选择方法
-    def select_model(self):
-        """选择YOLO模型文件"""
-        model_path, _ = QFileDialog.getOpenFileName(
-            self, tr("选择YOLO模型"), "", tr("模型文件 (*.pt *.pth);;所有文件 (*)")
-        )
-        
-        if model_path:
-            logger.info(f"选择模型文件: {model_path}")
-            self.model_path = model_path
-            self.model_label.setText(os.path.basename(model_path))
-            
-            # 尝试加载模型
-            if self.yolo_predictor.load_model(model_path):
-                self.auto_label_button.setEnabled(True)
-                self.auto_label_all_button.setEnabled(True)
-                QMessageBox.information(self, tr("成功"), tr("模型加载成功"))
-            else:
-                self.auto_label_button.setEnabled(False)
-                self.auto_label_all_button.setEnabled(False)
-                QMessageBox.warning(self, tr("错误"), tr("模型加载失败"))
-
-    # 添加自动标注方法
     def auto_label_current(self):
         """使用YOLO模型自动标注当前图像"""
         if not self.canvas.pixmap:
@@ -1193,7 +1167,7 @@ class YOLOLabelCreator(QMainWindow):
             self.statusBar().showMessage(tr("设置已更新"), 3000)
 
     def open_yolo_trainer(self):
-            """打开YOLOv8训练器对话框"""
+            """打开YOLO模型训练器对话框"""
             try:
                 trainer_dialog = YoloTrainerDialog(self)
                 trainer_dialog.exec_()

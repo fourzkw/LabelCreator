@@ -10,5 +10,5 @@ onnxslim==0.1.68
 onnxruntime==1.19.2
 onnxruntime-gpu==1.19.2
 
-# YOLOv8训练相关依赖
+# YOLO模型训练相关依赖（支持YOLOv8和YOLO11）
 ultralytics>=8.0.0

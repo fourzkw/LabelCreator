@@ -7,7 +7,7 @@ from .trainer_ui import YoloTrainerUI
 class YoloTrainerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("YOLOv8 训练设置")
+        self.setWindowTitle("YOLO模型训练器")
         self.setMinimumSize(800, 600)
         # 设置窗口标志，确保显示最小化和最大化按钮
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)

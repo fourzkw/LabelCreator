@@ -11,7 +11,7 @@ from PyQt5.QtCore import Qt, QSettings
 class YoloTrainerUI(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("YOLOv8 训练器")
+        self.setWindowTitle("YOLO模型训练器")
         self.setMinimumSize(800, 600)
         
         # 保存设置
@@ -96,9 +96,21 @@ class YoloTrainerUI(QMainWindow):
         yaml_layout.addWidget(self.yaml_browse)
         data_layout.addRow("数据集YAML文件:", yaml_layout)
         
+        # 添加模型版本选择
+        self.model_version = QComboBox()
+        self.model_version.addItems(["YOLOv8", "YOLO11"])
+        self.model_version.currentIndexChanged.connect(self.on_model_version_changed)
+        data_layout.addRow("模型版本:", self.model_version)
+        
+        # 添加模型类别选择
+        self.model_category = QComboBox()
+        self.model_category.addItems(["普通检测模型", "yolo-pose模型"])
+        self.model_category.currentIndexChanged.connect(self.on_model_category_changed)
+        data_layout.addRow("模型类别:", self.model_category)
+        
         self.model_type = QComboBox()
         self.model_type.addItems(["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"])
-        data_layout.addRow("模型类型:", self.model_type)
+        data_layout.addRow("模型大小:", self.model_type)
         
         self.pretrained_checkbox = QCheckBox("使用预训练权重")
         self.pretrained_checkbox.setChecked(True)
@@ -172,10 +184,46 @@ class YoloTrainerUI(QMainWindow):
         is_enabled = state == Qt.Checked
         self.custom_model_path.setEnabled(is_enabled)
         self.custom_model_browse.setEnabled(is_enabled)
+        self.model_version.setEnabled(not is_enabled)
+        self.model_category.setEnabled(not is_enabled)
         self.model_type.setEnabled(not is_enabled)
         self.pretrained_checkbox.setEnabled(not is_enabled)
+    
+    def on_model_version_changed(self, index):
+        """当模型版本改变时更新模型类型列表"""
+        version = self.model_version.currentText()
+        current_selection = self.model_type.currentText()
         
-
+        # 提取当前选择的大小（n, s, m, l, x）
+        if current_selection:
+            size = current_selection[-1] if current_selection[-1] in ['n', 's', 'm', 'l', 'x'] else 'n'
+        else:
+            size = 'n'
+        
+        # 清空并重新填充模型类型列表
+        self.model_type.clear()
+        if version == "YOLOv8":
+            models = ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
+            self.log_message("已切换到 YOLOv8 模型系列")
+        else:  # YOLO11
+            models = ["yolo11n", "yolo11s", "yolo11m", "yolo11l", "yolo11x"]
+            self.log_message("已切换到 YOLO11 模型系列")
+        
+        self.model_type.addItems(models)
+        
+        # 尝试保持相同的大小选择
+        for i, model in enumerate(models):
+            if model.endswith(size):
+                self.model_type.setCurrentIndex(i)
+                break
+    
+    def on_model_category_changed(self, index):
+        """当模型类别改变时更新提示信息"""
+        category = self.model_category.currentText()
+        if category == "yolo-pose模型":
+            self.log_message("注意：yolo-pose模型需要包含关键点标注的姿态检测数据集")
+        else:
+            self.log_message("使用普通检测模型")
     
     def setup_advanced_tab(self):
         layout = QVBoxLayout(self.advanced_tab)
@@ -297,16 +345,6 @@ class YoloTrainerUI(QMainWindow):
         advanced_group = QGroupBox("其他高级设置")
         advanced_layout = QFormLayout()
         
-        # 添加特征点检测设置
-        self.keypoints_checkbox = QCheckBox("启用特征点检测(姿态检测)")
-        self.keypoints_checkbox.setChecked(False)
-        advanced_layout.addRow("", self.keypoints_checkbox)
-        
-        # 添加特征点检测提示
-        self.keypoints_note = QLabel("注意：启用特征点检测将使用pose任务类型，需要专用的姿态检测数据集。")
-        self.keypoints_note.setWordWrap(True)
-        advanced_layout.addRow("", self.keypoints_note)
-        
         self.patience = QSpinBox()
         self.patience.setRange(0, 300)
         self.patience.setValue(100)
@@ -381,6 +419,8 @@ class YoloTrainerUI(QMainWindow):
             # 基本设置
             "conda_env": self.conda_env_combo.currentText(),
             "yaml_path": self.yaml_path.text(),
+            "model_version": self.model_version.currentText(),
+            "model_category": self.model_category.currentText(),
             "model_type": self.model_type.currentText(),
             "pretrained": self.pretrained_checkbox.isChecked(),
             "use_custom_model": self.custom_model_checkbox.isChecked(),
@@ -410,10 +450,7 @@ class YoloTrainerUI(QMainWindow):
             "workers": self.workers.value(),
             "device": self.device.text(),
             "cos_lr": self.cos_lr.isChecked(),
-            "cache": self.cache.isChecked(),
-            
-            # 特征点设置（姿态检测）
-            "enable_keypoints": self.keypoints_checkbox.isChecked()
+            "cache": self.cache.isChecked()
         }
         return params
     
@@ -430,7 +467,7 @@ class YoloTrainerUI(QMainWindow):
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             parent_dir = os.path.dirname(current_dir)  # 获取父目录路径
-            settings_path = os.path.join(parent_dir, "yolo_train_settings.json")
+            settings_path = os.path.join(parent_dir, "config", "yolo_train_settings.json")
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(params, f, ensure_ascii=False, indent=4)
             self.log_message(f"设置已保存到{settings_path}")
@@ -441,7 +478,20 @@ class YoloTrainerUI(QMainWindow):
         # 尝试从QSettings加载
         if self.settings.contains("yaml_path"):
             self.yaml_path.setText(self.settings.value("yaml_path", ""))
-            self.model_type.setCurrentText(self.settings.value("model_type", "yolov8n"))
+            
+            # 加载模型版本设置
+            model_version = self.settings.value("model_version", "YOLOv8")
+            self.model_version.setCurrentText(model_version)
+            # 触发版本变更事件以更新模型类型列表
+            self.on_model_version_changed(0)
+            
+            # 加载模型类别设置
+            model_category = self.settings.value("model_category", "普通检测模型")
+            self.model_category.setCurrentText(model_category)
+            
+            # 加载模型类型（在版本更新后）
+            model_type = self.settings.value("model_type", "yolov8n")
+            self.model_type.setCurrentText(model_type)
             self.pretrained_checkbox.setChecked(self.settings.value("pretrained", True, type=bool))
             
             # 加载自定义模型设置
@@ -476,10 +526,6 @@ class YoloTrainerUI(QMainWindow):
             self.device.setText(self.settings.value("device", ""))
             self.cos_lr.setChecked(self.settings.value("cos_lr", True, type=bool))
             self.cache.setChecked(self.settings.value("cache", False, type=bool))
-            
-            # 加载特征点设置
-            enable_keypoints = self.settings.value("enable_keypoints", False, type=bool)
-            self.keypoints_checkbox.setChecked(enable_keypoints)
             
             self.log_message("已加载保存的设置")
         

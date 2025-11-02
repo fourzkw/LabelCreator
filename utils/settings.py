@@ -47,7 +47,7 @@ class Settings:
     def _init_settings(self, app_dir):
         """初始化设置"""
         self.app_dir = app_dir
-        self.settings_file = os.path.join(app_dir, 'settings.json')
+        self.settings_file = os.path.join(app_dir, 'config', 'settings.json')
         self.shortcuts = DEFAULT_SHORTCUTS.copy()
         self.qsettings = QSettings()
         

@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Model Files - 大型模型文件
+*.pt
+*.pth
+*.onnx
+*.weights
+*.h5
+*.pb
+*.tflite
+
+# 但保留模型目录结构说明文件
+!pretrained_models/README.md
+!trained_models/README.md
+
+# Dataset Files - 数据集
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.zip
+*.tar
+*.gz
+
+# YOLO specific
+runs/
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+config/settings.json
+config/yolo_train_settings.json
+data.yaml
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

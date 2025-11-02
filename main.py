@@ -23,7 +23,7 @@ def exception_hook(exctype, value, traceback_obj):
     logger.critical(f"未捕获的异常: {error_msg}")
     print(f"未捕获的异常: {error_msg}")
     # 显示错误消息框
-    QMessageBox.critical(None, "Error", f"发生了意外错误:\n{str(value)}\n\n详细信息已记录到app.log")
+    QMessageBox.critical(None, "Error", f"发生了意外错误:\n{str(value)}\n\n详细信息已记录到logs/app.log")
 
 if __name__ == "__main__":
     try:
