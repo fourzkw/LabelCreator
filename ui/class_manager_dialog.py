@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                            QListWidget, QListWidgetItem, QInputDialog, QMessageBox)
+                           QListWidget, QListWidgetItem, QInputDialog, QMessageBox)
 from PyQt5.QtCore import Qt
 import os
 import yaml
@@ -8,6 +8,9 @@ import logging
 
 logger = logging.getLogger('YOLOLabelCreator.ClassManager')
 
+# 用于跟踪类别ID的映射关系（旧ID -> 新ID）
+class_id_mapping = {}
+
 class ClassManagerDialog(QDialog):
     def __init__(self, classes, data_yaml_path=None, parent=None):
         super().__init__(parent)
@@ -15,8 +18,11 @@ class ClassManagerDialog(QDialog):
         self.data_yaml_path = data_yaml_path
         self.original_classes = classes.copy()  # 保存原始类别列表，用于比较变化
         
+        # 初始化类别ID映射（跟踪类别顺序变化）
+        self.class_id_mapping = {i: i for i in range(len(self.classes))}  # 旧ID -> 新ID
+        
         self.setWindowTitle(tr("类别管理"))
-        self.setMinimumSize(400, 300)
+        self.setMinimumSize(500, 400)
         
         self.setup_ui()
         
@@ -29,7 +35,7 @@ class ClassManagerDialog(QDialog):
         self.populate_class_list()
         layout.addWidget(self.class_list)
         
-        # 按钮布局
+        # 按钮布局 - 第一行：基本操作
         button_layout = QHBoxLayout()
         
         # 添加类别按钮
@@ -48,6 +54,24 @@ class ClassManagerDialog(QDialog):
         button_layout.addWidget(self.delete_button)
         
         layout.addLayout(button_layout)
+        
+        # 按钮布局 - 第二行：排序操作
+        order_layout = QHBoxLayout()
+        
+        # 上移按钮
+        self.move_up_button = QPushButton(tr("↑ 上移"))
+        self.move_up_button.clicked.connect(self.move_class_up)
+        order_layout.addWidget(self.move_up_button)
+        
+        # 下移按钮
+        self.move_down_button = QPushButton(tr("↓ 下移"))
+        self.move_down_button.clicked.connect(self.move_class_down)
+        order_layout.addWidget(self.move_down_button)
+        
+        # 添加伸缩空间
+        order_layout.addStretch()
+        
+        layout.addLayout(order_layout)
         
         # 确定取消按钮
         dialog_buttons = QHBoxLayout()
@@ -125,13 +149,74 @@ class ClassManagerDialog(QDialog):
             del self.classes[current_index]
             self.populate_class_list()
     
+    def move_class_up(self):
+        """将选中的类别上移（降低索引）"""
+        current_index = self.class_list.currentRow()
+        
+        # 检查是否选中且不是第一个
+        if current_index <= 0:
+            QMessageBox.warning(self, tr("警告"), tr("请选择一个类别，且不能是第一个"))
+            return
+        
+        # 交换两个类别
+        self.classes[current_index], self.classes[current_index - 1] = \
+            self.classes[current_index - 1], self.classes[current_index]
+        
+        # 更新ID映射
+        self._update_id_mapping_after_swap(current_index, current_index - 1)
+        
+        # 刷新列表并保持选中状态
+        self.populate_class_list()
+        self.class_list.setCurrentRow(current_index - 1)
+    
+    def move_class_down(self):
+        """将选中的类别下移（增加索引）"""
+        current_index = self.class_list.currentRow()
+        
+        # 检查是否选中且不是最后一个
+        if current_index < 0 or current_index >= len(self.classes) - 1:
+            QMessageBox.warning(self, tr("警告"), tr("请选择一个类别，且不能是最后一个"))
+            return
+        
+        # 交换两个类别
+        self.classes[current_index], self.classes[current_index + 1] = \
+            self.classes[current_index + 1], self.classes[current_index]
+        
+        # 更新ID映射
+        self._update_id_mapping_after_swap(current_index, current_index + 1)
+        
+        # 刷新列表并保持选中状态
+        self.populate_class_list()
+        self.class_list.setCurrentRow(current_index + 1)
+    
+    def _update_id_mapping_after_swap(self, old_idx1, old_idx2):
+        """在交换两个类别后更新ID映射"""
+        # 交换映射中的对应关系
+        # 例如：原来 old_id1->new_id1, old_id2->new_id2
+        # 交换后应该 old_id1->new_id2, old_id2->new_id1
+        
+        # 找到原始的ID（在original_classes中的索引）
+        for old_id, new_id in list(self.class_id_mapping.items()):
+            if new_id == old_idx1:
+                self.class_id_mapping[old_id] = old_idx2
+            elif new_id == old_idx2:
+                self.class_id_mapping[old_id] = old_idx1
+    
     def get_classes(self):
         """返回修改后的类别列表"""
         return self.classes
     
+    def get_class_id_mapping(self):
+        """返回类别ID映射（旧ID -> 新ID）"""
+        return self.class_id_mapping
+    
     def has_changes(self):
         """检查类别列表是否有变化"""
         return self.classes != self.original_classes
+    
+    def has_order_changes(self):
+        """检查类别顺序是否有变化"""
+        return any(self.class_id_mapping.get(i, i) != i for i in range(len(self.original_classes)))
     
     def accept(self):
         """确认按钮点击事件"""

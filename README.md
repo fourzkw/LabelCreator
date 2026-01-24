@@ -11,7 +11,7 @@
 
 ### 核心特性
 - **手动标注**：直观的可视化界面，支持边界框和关键点标注
-- **自动标注**：集成YOLOv8/YOLO11模型，实现智能预测和批量标注
+- **自动标注**：集成YOLOv8/YOLO11/YOLO26模型，实现智能预测和批量标注
 - **模型训练**：内置训练器，支持检测模型和姿态检测模型训练
 - **模型转换**：一键将PyTorch模型转换为ONNX格式，便于跨平台部署
 - **数据管理**：数据集划分、类别管理等完整的数据处理工具链
@@ -138,14 +138,15 @@ label-creator/
 - 支持可变数量的关键点
 
 ### 自动标注
-- 集成YOLOv8/YOLO11模型进行智能预测
+- 集成YOLOv5/YOLOv7/YOLOv8/YOLO11/YOLO26模型进行智能预测
 - 支持单张图像预测和批量自动标注
 - 可调整置信度阈值和IoU阈值
 - 支持带特征点的模型自动标注
+- YOLO26模型特别适合边缘设备部署，速度更快
 - 预测结果可手动调整优化
 
 ### 模型训练功能
-- 内置YOLO训练器（支持YOLOv8和YOLO11）
+- 内置YOLO训练器（支持YOLOv8、YOLO11和YOLO26）
 - 多种模型规模：n/s/m/l/x
 - 预训练权重或自定义模型训练
 - 支持检测模型和姿态检测模型
@@ -240,20 +241,48 @@ label-creator/
 #### 配置模型
 1. 在 **"设置 → 模型设置"** 中配置预测模型路径
 2. 推荐使用 `pretrained_models/` 目录存放模型文件
-3. 支持的模型：YOLOv8、YOLO11（检测/姿态）
+3. 支持的模型版本：
+   - **YOLOv5**: 经典版本，性能稳定
+   - **YOLOv7**: 高精度版本
+   - **YOLOv8**: Ultralytics 新一代模型
+   - **YOLO11**: 最新版本，速度与精度兼顾
+   - **YOLO26**: 轻量级版本，特别适合边缘设备部署
+4. 支持的模型类型：检测模型 / 姿态检测模型（带特征点）
+5. 支持的模型格式：`.pt` (PyTorch) / `.onnx` (跨平台推理)
 
 #### 单张预测
 1. 选择要标注的图像
 2. 点击 **"自动标注"** 按钮（或 `Ctrl+A`）
-3. 调整置信度阈值和IoU阈值
-4. 点击 **"确认"** 开始预测
-5. 检查结果并手动调整
+3. 系统会使用当前配置的模型进行预测
+4. 检查结果并手动调整
 
 #### 批量标注
 1. 点击 **"批量自动标注"** 按钮（或 `Ctrl+Shift+A`）
-2. 设置阈值参数
-3. 点击 **"开始"** 自动处理所有图像
-4. 完成后逐张检查和修正
+2. 系统会自动处理文件夹中的所有图像
+3. 完成后逐张检查和修正
+
+#### 获取预训练模型
+可以从以下来源获取 YOLO 预训练模型：
+
+**方式一：使用 Ultralytics 自动下载**
+```python
+from ultralytics import YOLO
+
+# 自动下载官方预训练模型
+model = YOLO('yolov8n.pt')      # YOLOv8 nano
+model = YOLO('yolo11n.pt')      # YOLO11 nano
+model = YOLO('yolo26n.pt')      # YOLO26 nano (轻量级)
+model = YOLO('yolov8n-pose.pt') # 姿态检测模型
+```
+
+**方式二：手动下载**
+- Ultralytics 官方: https://github.com/ultralytics/ultralytics
+- 下载后放入 `pretrained_models/` 目录
+
+**推荐模型选择**：
+- **边缘设备/实时应用**: YOLO26n, YOLO11n (速度快)
+- **高精度需求**: YOLOv8m, YOLOv8l (精度高)
+- **姿态检测**: yolov8n-pose.pt (关键点检测)
 
 > **提示**：自动标注结果需要人工审核和修正以确保质量。
 
@@ -297,7 +326,7 @@ label-creator/
 
 **基本设置**
 - 数据集配置文件（`data.yaml`）路径
-- 模型版本：YOLOv8 / YOLO11
+- 模型版本：YOLOv8 / YOLO11 / YOLO26（推荐用于边缘设备）
 - 模型类型：普通检测 / 姿态检测
 - 模型规模：n / s / m / l / x
 - 是否使用预训练权重
@@ -360,7 +389,7 @@ label-creator/
 
 ### 技术栈
 - **界面框架**：PyQt5 5.15+
-- **深度学习**：Ultralytics (YOLOv8/YOLO11)
+- **深度学习**：Ultralytics (YOLOv8/YOLO11/YOLO26)
 - **模型推理**：PyTorch + ONNX Runtime
 - **数据处理**：NumPy, Pandas
 - **模型转换**：ONNX, onnxslim
@@ -468,7 +497,7 @@ label-creator/
 **A**:
 - 调整置信度阈值（降低以获得更多检测）
 - 使用更适合的预训练模型
-- 尝试更大规模的模型（如yolov8m、yolov8l）
+- 尝试更大规模的模型（如yolov8m、yolov8l、yolo26l）
 - 确保模型与数据集类别匹配
 </details>
 
@@ -491,7 +520,7 @@ label-creator/
 **A**:
 - 减小batch_size（如从16降至8）
 - 减小img_size（如从640降至416）
-- 使用更小的模型（如yolov8n）
+- 使用更小的模型（如yolov8n、yolo26n，YOLO26特别适合边缘设备）
 - 关闭不必要的程序释放内存
 </details>
 

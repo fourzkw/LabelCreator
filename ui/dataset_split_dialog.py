@@ -19,6 +19,7 @@ class DatasetSplitDialog(QDialog):
         super().__init__(parent)
         self.settings = QSettings()
         self.current_dir = current_dir  # 保存当前打开的目录
+        self._image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')
         
         self.setWindowTitle(tr("数据集划分"))
         self.setMinimumWidth(500)
@@ -31,6 +32,7 @@ class DatasetSplitDialog(QDialog):
             parent_dir = os.path.dirname(self.current_dir)
             self.output_path.setText(os.path.join(parent_dir, "dataset_split"))
             self.update_split_button()
+            self.update_current_total_count()
             
         self.load_settings()
         
@@ -95,6 +97,16 @@ class DatasetSplitDialog(QDialog):
         self.create_yaml = QCheckBox(tr("创建YAML配置文件"))
         self.create_yaml.setChecked(True)
         ratio_layout.addRow("", self.create_yaml)
+
+        # 仅划分有标签图片（默认保持原行为）
+        self.only_labeled = QCheckBox(tr("仅划分有标签的图片"))
+        self.only_labeled.setChecked(True)
+        self.only_labeled.stateChanged.connect(self.update_current_total_count)
+        ratio_layout.addRow("", self.only_labeled)
+
+        # 当前划分图片总数显示
+        self.current_total_label = QLabel("0")
+        ratio_layout.addRow(tr("当前划分图片总数:"), self.current_total_label)
         
         ratio_group.setLayout(ratio_layout)
         layout.addWidget(ratio_group)
@@ -112,6 +124,7 @@ class DatasetSplitDialog(QDialog):
         
         # 初始化测试集比例
         self.update_test_ratio()
+        self.update_current_total_count()
     
     def update_test_ratio(self):
         """更新测试集比例"""
@@ -128,6 +141,80 @@ class DatasetSplitDialog(QDialog):
             self.val_ratio.blockSignals(False)
         
         self.test_ratio_label.setText(f"{test:.2f}")
+
+    def _has_label_content(self, label_path):
+        """判断标签文件是否包含有效标注内容（非空白行）"""
+        if not label_path or not os.path.exists(label_path):
+            return False
+        try:
+            with open(label_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        return True
+        except Exception as e:
+            logger.error(f"读取标签文件失败: {label_path}, 错误: {str(e)}")
+        return False
+
+    def _scan_images_and_labels(self, source_path):
+        """
+        扫描目录（含子目录）收集图片与标签文件。
+
+        Returns:
+            tuple[list[str], dict[str, list[str]]]: (image_files, labels_by_basename)
+        """
+        image_files = []
+        labels_by_basename = {}
+
+        if not source_path or not os.path.exists(source_path):
+            return image_files, labels_by_basename
+
+        for root, _, files in os.walk(source_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                file_lower = file.lower()
+
+                # 图像
+                if file_lower.endswith(self._image_extensions):
+                    image_files.append(file_path)
+                    continue
+
+                # 标签
+                if file_lower.endswith('.txt'):
+                    # 排除classes.txt等非标签文件
+                    if file_lower in ('classes.txt', 'data.yaml'):
+                        continue
+                    base = os.path.splitext(os.path.basename(file))[0]
+                    labels_by_basename.setdefault(base, []).append(file_path)
+
+        return image_files, labels_by_basename
+
+    def update_current_total_count(self):
+        """更新当前可划分图片总数显示"""
+        source_path = self.source_path.text()
+        if not source_path or not os.path.exists(source_path):
+            self.current_total_label.setText("0")
+            return
+
+        image_files, labels_by_basename = self._scan_images_and_labels(source_path)
+        only_labeled = self.only_labeled.isChecked() if hasattr(self, 'only_labeled') else True
+
+        eligible = 0
+        for img_path in image_files:
+            img_name = os.path.splitext(os.path.basename(img_path))[0]
+            # 优先同目录同名标签
+            label_path = os.path.join(os.path.dirname(img_path), f"{img_name}.txt")
+            if not os.path.exists(label_path):
+                # 退化：全局同名标签
+                candidates = labels_by_basename.get(img_name, [])
+                label_path = candidates[0] if candidates else None
+
+            if only_labeled:
+                if self._has_label_content(label_path):
+                    eligible += 1
+            else:
+                eligible += 1
+
+        self.current_total_label.setText(str(eligible))
     
     def browse_output(self):
         """浏览输出路径"""
@@ -154,8 +241,10 @@ class DatasetSplitDialog(QDialog):
         self.val_ratio.setValue(float(self.settings.value("dataset_split/val_ratio", 0.2)))
         self.random_seed.setValue(int(self.settings.value("dataset_split/random_seed", 42)))
         self.create_yaml.setChecked(self.settings.value("dataset_split/create_yaml", True, type=bool))
+        self.only_labeled.setChecked(self.settings.value("dataset_split/only_labeled", True, type=bool))
         
         self.update_split_button()
+        self.update_current_total_count()
     
     def save_settings(self):
         """保存设置"""
@@ -164,6 +253,7 @@ class DatasetSplitDialog(QDialog):
         self.settings.setValue("dataset_split/val_ratio", self.val_ratio.value())
         self.settings.setValue("dataset_split/random_seed", int(self.random_seed.value()))
         self.settings.setValue("dataset_split/create_yaml", self.create_yaml.isChecked())
+        self.settings.setValue("dataset_split/only_labeled", self.only_labeled.isChecked())
         self.settings.sync()
     
     def split_dataset(self):
@@ -175,6 +265,7 @@ class DatasetSplitDialog(QDialog):
         test_ratio = 1.0 - train_ratio - val_ratio
         random_seed = int(self.random_seed.value())
         create_yaml = self.create_yaml.isChecked()
+        only_labeled = self.only_labeled.isChecked()
         
         # 保存设置
         self.save_settings()
@@ -190,92 +281,72 @@ class DatasetSplitDialog(QDialog):
             os.makedirs(output_path, exist_ok=True)
             
             # 获取所有图像和标签文件（包括子目录）
-            image_files = []
-            label_files = []
-            
-            # 支持的图像格式
-            image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')
-            
-            # 遍历目录及子目录
-            for root, _, files in os.walk(source_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    file_lower = file.lower()
-                    
-                    # 收集图像文件
-                    if file_lower.endswith(image_extensions):
-                        image_files.append(file_path)
-                    
-                    # 收集标签文件
-                    if file_lower.endswith('.txt'):
-                        # 排除classes.txt等非标签文件
-                        if file_lower != 'classes.txt' and file_lower != 'data.yaml':
-                            label_files.append(file_path)
-            
-            logger.info(f"找到 {len(image_files)} 个图像文件和 {len(label_files)} 个标签文件")
-            
-            # 匹配图像和标签
-            valid_pairs = []
+            image_files, labels_by_basename = self._scan_images_and_labels(source_path)
+            logger.info(f"找到 {len(image_files)} 个图像文件")
+
+            # 匹配图像和标签（允许无标签）
+            all_pairs = []
+            labeled_pairs = []  # 仅用于推断类别/姿态检测等需要标签内容的逻辑
+
             for img_path in image_files:
                 img_dir = os.path.dirname(img_path)
                 img_name = os.path.splitext(os.path.basename(img_path))[0]
-                
-                # 查找对应的标签文件
-                label_name = f"{img_name}.txt"
-                
-                # 首先在同一目录下查找
-                label_path = os.path.join(img_dir, label_name)
-                
-                # 如果同目录下没有，则在所有标签文件中查找
+
+                # 优先同一目录同名标签
+                label_path = os.path.join(img_dir, f"{img_name}.txt")
                 if not os.path.exists(label_path):
-                    matching_labels = [l for l in label_files if os.path.basename(l) == label_name]
-                    if matching_labels:
-                        label_path = matching_labels[0]
-                    else:
-                        label_path = None
-                
-                if label_path and os.path.exists(label_path):
-                    valid_pairs.append((img_path, label_path))
-            
-            if not valid_pairs:
-                QMessageBox.warning(self, tr("警告"), tr("没有找到有效的图像和标签对!"))
-                logger.warning(f"在 {source_path} 中没有找到有效的图像和标签对")
+                    candidates = labels_by_basename.get(img_name, [])
+                    label_path = candidates[0] if candidates else None
+
+                has_content = self._has_label_content(label_path)
+
+                if only_labeled and not has_content:
+                    continue
+
+                all_pairs.append((img_path, label_path))
+                if has_content:
+                    labeled_pairs.append((img_path, label_path))
+
+            if not all_pairs:
+                QMessageBox.warning(self, tr("警告"), tr("没有找到可用于划分的图片!"))
+                logger.warning(f"在 {source_path} 中没有找到可用于划分的图片 (only_labeled={only_labeled})")
                 return
             
             # 检查是否是姿态检测数据集（查看标签文件中是否有关键点数据）
             is_pose_dataset = False
-            sample_label_path = valid_pairs[0][1]
-            try:
-                with open(sample_label_path, 'r') as f:
-                    label_content = f.readline().strip()
-                    parts = label_content.split()
-                    # 如果标签行包含的数值超过5个，则认为这是一个包含关键点的姿态检测数据集
-                    # 标准YOLO格式为：class_id x_center y_center width height
-                    # 姿态检测格式为：class_id x_center y_center width height x1 y1 x2 y2 ...
-                    if len(parts) > 5:
-                        is_pose_dataset = True
-                        logger.info(f"检测到姿态检测数据集，包含关键点数据")
-            except Exception as e:
-                logger.error(f"检查数据集类型时出错: {str(e)}")
-                # 即使出错也继续执行，当作普通数据集处理
-            
-            logger.info(f"找到 {len(valid_pairs)} 个有效的图像和标签对")
+            sample_label_path = labeled_pairs[0][1] if labeled_pairs else None
+            if sample_label_path:
+                try:
+                    with open(sample_label_path, 'r', encoding='utf-8') as f:
+                        label_content = f.readline().strip()
+                        parts = label_content.split()
+                        # 如果标签行包含的数值超过5个，则认为这是一个包含关键点的姿态检测数据集
+                        # 标准YOLO格式为：class_id x_center y_center width height
+                        # 姿态检测格式为：class_id x_center y_center width height x1 y1 x2 y2 ...
+                        if len(parts) > 5:
+                            is_pose_dataset = True
+                            logger.info(f"检测到姿态检测数据集，包含关键点数据")
+                except Exception as e:
+                    logger.error(f"检查数据集类型时出错: {str(e)}")
+                    # 即使出错也继续执行，当作普通数据集处理
+
+            logger.info(f"可划分图片数量: {len(all_pairs)} (含标注内容: {len(labeled_pairs)})")
             
             # 设置随机种子
             random.seed(random_seed)
             # 随机打乱文件列表
-            random.shuffle(valid_pairs)
+            random.shuffle(all_pairs)
             
             # 计算每个集合的文件数量
-            total_files = len(valid_pairs)
+            total_files = len(all_pairs)
             train_count = int(total_files * train_ratio)
             val_count = int(total_files * val_ratio)
             test_count = total_files - train_count - val_count
             
             # 划分文件
-            train_files = valid_pairs[:train_count]
-            val_files = valid_pairs[train_count:train_count+val_count]
-            test_files = valid_pairs[train_count+val_count:]
+            train_files = all_pairs[:train_count]
+            val_files = all_pairs[train_count:train_count+val_count]
+            test_files = all_pairs[train_count+val_count:]
             
             # 创建进度对话框
             progress = QProgressDialog(tr("正在划分数据集..."), tr("取消"), 0, total_files, self)
@@ -363,9 +434,11 @@ class DatasetSplitDialog(QDialog):
                 # 如果仍然没有类别信息，尝试从标签文件中推断
                 if not classes:
                     max_class = -1
-                    for _, label_path in valid_pairs:
+                    for _, label_path in labeled_pairs:
+                        if not label_path:
+                            continue
                         try:
-                            with open(label_path, 'r') as f:
+                            with open(label_path, 'r', encoding='utf-8') as f:
                                 for line in f:
                                     parts = line.strip().split()
                                     if parts:
@@ -395,7 +468,7 @@ class DatasetSplitDialog(QDialog):
                         if is_pose_dataset:
                             # 尝试确定关键点数量
                             try:
-                                with open(sample_label_path, 'r') as label_f:
+                                with open(sample_label_path, 'r', encoding='utf-8') as label_f:
                                     label_content = label_f.readline().strip()
                                     parts = label_content.split()
                                     # 计算关键点对数量：(总参数数量 - 5) / 2
@@ -467,7 +540,8 @@ class DatasetSplitDialog(QDialog):
             bool: 复制是否成功
         """
         img_file = os.path.basename(img_path)
-        label_file = os.path.basename(label_path)
+        # label_path 可能为空（允许无标签图片）
+        label_file = f"{os.path.splitext(img_file)[0]}.txt"
         
         # 复制图像
         dest_img_path = os.path.join(output_path, split_type, "images", img_file)
@@ -480,10 +554,14 @@ class DatasetSplitDialog(QDialog):
         # 复制标签 - 使用读写方式确保完整复制特征点数据
         dest_label_path = os.path.join(output_path, split_type, "labels", label_file)
         try:
-            # 使用读写模式复制文件内容，而不是直接复制文件
-            with open(label_path, 'r', encoding='utf-8') as src_file:
-                content = src_file.read()
-                
+            # label_path 可能为空（允许无标签图片）
+            content = ""
+            if label_path and os.path.exists(label_path):
+                # 使用读写模式复制文件内容，而不是直接复制文件
+                with open(label_path, 'r', encoding='utf-8') as src_file:
+                    content = src_file.read()
+
+            # YOLO 训练通常期望 labels 下有同名 txt（无标注则为空文件）
             with open(dest_label_path, 'w', encoding='utf-8') as dst_file:
                 dst_file.write(content)
         except Exception as e:

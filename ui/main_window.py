@@ -8,7 +8,8 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QListWidget, QMessageBox,
                              QComboBox, QLineEdit, QSplitter, QAction, QTreeView,
                              QGroupBox, QFrame, QStyle, QDialog, QApplication, QShortcut,
-                             QScrollArea)
+                             QScrollArea, QProgressDialog)
+from PyQt5.QtWidgets import QCheckBox
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QKeySequence
 from PyQt5.QtCore import Qt, QDir
 
@@ -268,6 +269,19 @@ class YOLOLabelCreator(QMainWindow):
         
         auto_layout.addLayout(model_layout)
         auto_layout.addWidget(self.model_label)
+
+        # 批量自动标注：是否对“已有标签”的图片也执行自动标注（默认保持现有行为：启用）
+        model_params = self.settings.get_model_params()
+        self.auto_label_include_labeled_checkbox = QCheckBox(tr("批量自动标注包含已有标签图片"))
+        include_labeled = model_params.get("auto_label_include_labeled", True)
+        if isinstance(include_labeled, str):
+            include_labeled = include_labeled.lower() == "true"
+        self.auto_label_include_labeled_checkbox.setChecked(bool(include_labeled))
+        self.auto_label_include_labeled_checkbox.setToolTip(
+            tr("开启：对已有标签文件的图片也会自动标注（可能产生重复框）\n关闭：跳过已有标签的图片")
+        )
+        self.auto_label_include_labeled_checkbox.stateChanged.connect(self.on_auto_label_include_labeled_changed)
+        auto_layout.addWidget(self.auto_label_include_labeled_checkbox)
         
         # 添加标签路径显示
         self.label_path_display = QLabel(tr("Label path: Not loaded"))
@@ -957,6 +971,128 @@ class YOLOLabelCreator(QMainWindow):
                 f.write(line)
         self.update_data_yaml()
 
+    def update_all_labels_with_class_mapping(self, class_id_mapping):
+        """
+        根据类别ID映射更新所有标签文件中的类别ID
+        
+        Args:
+            class_id_mapping (dict): 旧ID -> 新ID 的映射字典
+            
+        Note:
+            当类别顺序改变时调用此方法，自动更新所有相关的标签文件
+        """
+        if not self.current_dir:
+            return
+        
+        # 显示进度对话框
+        from PyQt5.QtWidgets import QProgressDialog
+        progress = QProgressDialog(
+            tr("正在更新标签文件中的类别ID..."),
+            tr("取消"),
+            0,
+            0,
+            self
+        )
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+        QApplication.processEvents()
+        
+        try:
+            # 获取所有标签文件
+            labels_dir = os.path.join(self.current_dir, "labels")
+            if not os.path.exists(labels_dir):
+                logger.warning(f"标签目录不存在: {labels_dir}")
+                progress.close()
+                return
+            
+            # 统计更新结果
+            updated_count = 0
+            error_count = 0
+            total_files = 0
+            
+            # 遍历所有标签文件
+            for filename in os.listdir(labels_dir):
+                if filename.endswith('.txt'):
+                    total_files += 1
+            
+            progress.setMaximum(total_files)
+            
+            for idx, filename in enumerate(os.listdir(labels_dir)):
+                if filename.endswith('.txt'):
+                    label_path = os.path.join(labels_dir, filename)
+                    
+                    try:
+                        # 读取标签文件
+                        with open(label_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                        
+                        # 更新类别ID
+                        updated_lines = []
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            
+                            parts = line.split()
+                            if len(parts) >= 5:  # 有效的YOLO格式行
+                                try:
+                                    old_class_id = int(parts[0])
+                                    
+                                    # 获取新的类别ID
+                                    new_class_id = class_id_mapping.get(old_class_id, old_class_id)
+                                    
+                                    # 如果类别ID改变了，更新它
+                                    if new_class_id != old_class_id:
+                                        parts[0] = str(new_class_id)
+                                        updated_lines.append(' '.join(parts) + '\n')
+                                    else:
+                                        updated_lines.append(line + '\n')
+                                        
+                                except (ValueError, IndexError):
+                                    # 保留无法解析的行
+                                    updated_lines.append(line + '\n')
+                        
+                        # 写回标签文件
+                        if updated_lines:
+                            with open(label_path, 'w', encoding='utf-8') as f:
+                                f.writelines(updated_lines)
+                            updated_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"更新标签文件失败 {label_path}: {str(e)}")
+                        error_count += 1
+                    
+                    # 更新进度
+                    progress.setValue(idx + 1)
+                    QApplication.processEvents()
+            
+            progress.close()
+            
+            # 显示更新结果
+            if error_count > 0:
+                QMessageBox.information(
+                    self,
+                    tr("更新完成"),
+                    tr(f"已成功更新 {updated_count} 个标签文件\n失败 {error_count} 个文件")
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    tr("更新完成"),
+                    tr(f"已成功更新 {updated_count} 个标签文件中的类别ID")
+                )
+            
+            logger.info(f"已更新 {updated_count} 个标签文件，失败 {error_count} 个")
+            
+        except Exception as e:
+            progress.close()
+            logger.error(f"更新标签文件失败: {str(e)}")
+            QMessageBox.warning(
+                self,
+                tr("错误"),
+                tr(f"更新标签文件失败: {str(e)}")
+            )
+
     def update_data_yaml(self):
         if not self.current_dir:
             return
@@ -1055,12 +1191,30 @@ class YOLOLabelCreator(QMainWindow):
             
             # 处理每张图像
             processed_count = 0
+            skipped_count = 0
+            include_labeled = True
+            if hasattr(self, "auto_label_include_labeled_checkbox"):
+                include_labeled = self.auto_label_include_labeled_checkbox.isChecked()
             for i, image_file in enumerate(self.image_files):
                 if progress.wasCanceled():
                     break
                     
                 image_path = os.path.join(self.current_folder, image_file)
                 progress.setLabelText(tr(f"正在处理 ({i+1}/{len(self.image_files)}): {image_file}"))
+
+                # 如果用户选择“不标注已有标签图片”，则跳过已有标签（非空标签文件）的图片
+                if not include_labeled:
+                    try:
+                        label_path = self.get_label_path(image_path)
+                        if self._label_file_has_annotations(label_path):
+                            skipped_count += 1
+                            logger.info(f"批量自动标注 - 跳过已有标签: {image_file} -> {label_path}")
+                            progress.setValue(i + 1)
+                            QApplication.processEvents()
+                            continue
+                    except Exception as e:
+                        # 判断失败不影响主流程，按“需要处理”继续
+                        logger.warning(f"批量自动标注 - 检查已有标签失败，将继续处理 {image_file}: {str(e)}")
                 
                 # 加载图像
                 self.current_image_index = i
@@ -1098,16 +1252,55 @@ class YOLOLabelCreator(QMainWindow):
             self.load_image(image_path)
             
             # 显示完成消息
-            self.statusBar().showMessage(tr(f"批量标注完成，成功处理 {processed_count} 张图像"), 5000)
+            if skipped_count > 0:
+                self.statusBar().showMessage(
+                    tr(f"批量标注完成：处理 {processed_count} 张，跳过已有标签 {skipped_count} 张"),
+                    5000
+                )
+            else:
+                self.statusBar().showMessage(tr(f"批量标注完成，成功处理 {processed_count} 张图像"), 5000)
             
         except Exception as e:
             logger.error(f"批量自动标注失败: {str(e)}\n{traceback.format_exc()}")
             QMessageBox.warning(self, tr("错误"), tr(f"批量自动标注失败: {str(e)}"))
 
+    def _label_file_has_annotations(self, label_path: str) -> bool:
+        """判断标签文件是否存在且包含至少一行有效标注（非空白）。"""
+        try:
+            if not label_path or not os.path.exists(label_path):
+                return False
+            with open(label_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        return True
+            return False
+        except Exception:
+            # 保守处理：无法判断时，当作“没有标签”，避免误跳过
+            return False
+
+    def on_auto_label_include_labeled_changed(self, _state):
+        """保存“批量自动标注是否包含已有标签图片”的设置"""
+        try:
+            params = self.settings.get_model_params()
+            params["auto_label_include_labeled"] = self.auto_label_include_labeled_checkbox.isChecked()
+            self.settings.save_model_params(params)
+        except Exception as e:
+            logger.warning(f"保存批量自动标注开关失败: {str(e)}")
+
 
     # 添加快捷键设置方法
     def setup_shortcuts(self):
         """设置键盘快捷键"""
+        # 清理之前创建的“数字快捷键”，避免重复绑定（show_settings 会重复调用 setup_shortcuts）
+        if hasattr(self, "_class_number_shortcuts"):
+            for sc in self._class_number_shortcuts:
+                try:
+                    sc.setEnabled(False)
+                    sc.setParent(None)
+                except Exception:
+                    pass
+        self._class_number_shortcuts = []
+
         # 保存标签
         save_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('save_current')), self)
         save_shortcut.activated.connect(self.save_current)
@@ -1158,6 +1351,41 @@ class YOLOLabelCreator(QMainWindow):
         toggle_keypoint_shortcut = QShortcut(QKeySequence(self.settings.get_shortcut('toggle_keypoint_mode')), self)
         toggle_keypoint_shortcut.activated.connect(self.toggle_keypoint_mode)
 
+        # 数字快捷键：1-9（以及0）快速切换“当前标注类别”
+        # 规则：按 1 选第 1 类（class_id=0），按 2 选第 2 类（class_id=1）... 按 9 选第 9 类（class_id=8）
+        # 可选：按 0 选第 10 类（class_id=9）
+        for n in range(1, 10):
+            sc = QShortcut(QKeySequence(str(n)), self)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(lambda cid=n - 1: self.set_current_class_by_index(cid))
+            self._class_number_shortcuts.append(sc)
+
+        sc0 = QShortcut(QKeySequence("0"), self)
+        sc0.setContext(Qt.WidgetWithChildrenShortcut)
+        sc0.activated.connect(lambda: self.set_current_class_by_index(9))
+        self._class_number_shortcuts.append(sc0)
+
+    def set_current_class_by_index(self, class_id: int):
+        """通过快捷键设置当前标注类别（同步下拉框与画布）"""
+        # 如果正在输入文本（比如添加类别/搜索/重命名），不要劫持数字键
+        focus = QApplication.focusWidget()
+        if focus is not None:
+            # 常见可编辑控件：QLineEdit（含 QComboBox 的编辑框）
+            if isinstance(focus, QLineEdit):
+                return
+            # 其他可编辑控件用 hasSelectedText/undo 等特征来粗略判断也可能误伤，这里先保持保守
+
+        if not self.classes:
+            return
+
+        if 0 <= class_id < len(self.classes):
+            # 通过设置 combo 来复用现有逻辑（会触发 update_current_class -> canvas.set_current_class）
+            self.class_combo.setCurrentIndex(class_id)
+            self.statusBar().showMessage(
+                tr(f"当前类别：{self.get_class_name(class_id)} (ID: {class_id})"),
+                1500
+            )
+
     def show_settings(self):
         """显示设置对话框"""
         dialog = SettingsDialog(self.settings, self)  # Now this will work correctly
@@ -1198,24 +1426,31 @@ class YOLOLabelCreator(QMainWindow):
                     conf_threshold=new_params['confidence_threshold'],
                     iou_threshold=new_params['iou_threshold'],
                     max_detections=new_params['max_detections'],
-                    device=new_params['device']
+                    device=new_params['device'],
+                    model_version=new_params.get('model_version', 'yolov8')
                 )
                 
                 # 如果选择了新模型，加载它
                 new_model_path = new_params.get('model_path')
+                new_model_version = new_params.get('model_version', 'yolov8')
                 if new_model_path and (not self.model_path or new_model_path != self.model_path):
                     if os.path.exists(new_model_path):
-                        logger.info(f"加载新模型: {new_model_path}")
-                        if self.yolo_predictor.load_model(new_model_path):
+                        logger.info(f"加载新模型: {new_model_path} (版本: {new_model_version})")
+                        if self.yolo_predictor.load_model(new_model_path, new_model_version):
                             self.model_path = new_model_path
                             self.auto_label_button.setEnabled(True)
                             self.auto_label_all_button.setEnabled(True)
+                            
+                            # 更新模型标签显示
+                            model_name = os.path.basename(new_model_path)
+                            self.model_label.setText(tr(f"已加载: {model_name} ({new_model_version.upper()})"))
                         else:
                             # 如果加载失败，重置模型路径
                             new_params['model_path'] = ""
                             self.settings.save_model_params(new_params)
                             self.auto_label_button.setEnabled(False)
                             self.auto_label_all_button.setEnabled(False)
+                            self.model_label.setText(tr("模型加载失败"))
                 
                 # 更新自动预测按钮的状态
                 self.auto_label_button.setEnabled(bool(self.model_path))
@@ -1255,12 +1490,21 @@ class YOLOLabelCreator(QMainWindow):
             if dialog.exec_() == QDialog.Accepted:
                 # 获取修改后的类别列表
                 new_classes = dialog.get_classes()
+                old_classes = self.classes.copy()
                 
                 # 检查是否有变化
                 if dialog.has_changes():
+                    # 获取类别ID映射（用于更新已标注的标签）
+                    class_id_mapping = dialog.get_class_id_mapping()
+                    
                     # 更新类别列表
                     self.classes = new_classes
                     self.update_class_combo()
+                    
+                    # 检查是否只是顺序变化
+                    if dialog.has_order_changes() and old_classes == new_classes:
+                        # 类别顺序改变，需要更新所有标签文件中的类别ID
+                        self.update_all_labels_with_class_mapping(class_id_mapping)
                     
                     # 如果当前有图像加载，可能需要更新标注
                     if self.canvas.pixmap:

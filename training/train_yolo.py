@@ -1,7 +1,16 @@
 import os
 import json
 import argparse
-from ultralytics import YOLO
+
+
+def _is_winerror_1455(err: BaseException) -> bool:
+    """Return True if this looks like Windows 'pagefile too small' (WinError 1455)."""
+    # Common messages:
+    # - OSError: [WinError 1455] 页面文件太小，无法完成操作。
+    # - OSError: [WinError 1455] The paging file is too small for this operation to complete.
+    msg = str(err)
+    winerror = getattr(err, "winerror", None)
+    return winerror == 1455 or "WinError 1455" in msg or "页面文件太小" in msg or "paging file is too small" in msg.lower()
 
 def load_settings(settings_path=None):
     """从JSON文件加载训练设置"""
@@ -62,6 +71,9 @@ def print_settings(settings):
 def train_yolo(settings):
     """使用设置训练YOLOv8模型"""
     try:
+        # Import here to reduce accidental imports in multiprocessing child processes on Windows.
+        from ultralytics import YOLO
+
         # 获取项目根目录
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         pretrained_models_dir = os.path.join(script_dir, "pretrained_models")
@@ -159,8 +171,19 @@ def train_yolo(settings):
             print("数据集YAML必须包含关键点(keypoints)定义和正确的标注格式。")
             print("详情请参考：https://docs.ultralytics.com/datasets/keypoints/")
             
-        # 执行训练，指定任务类型
-        model.train(task=task, **train_args)
+        # On Windows, dataloader workers > 0 will spawn subprocesses that import torch again.
+        # If the system pagefile is too small, those child imports can fail (WinError 1455).
+        try:
+            # 执行训练，指定任务类型
+            model.train(task=task, **train_args)
+        except OSError as e:
+            if os.name == "nt" and _is_winerror_1455(e) and int(train_args.get("workers", 0)) > 0:
+                print("\n检测到 WinError 1455（页面文件/虚拟内存太小）导致的加载失败。")
+                print("将自动把 workers 设为 0（禁用多进程数据加载）并重试训练...\n")
+                train_args["workers"] = 0
+                model.train(task=task, **train_args)
+            else:
+                raise
         
         print("\n训练完成!")
         print(f"模型保存在: {os.path.join(train_args.get('project', ''), train_args.get('name', 'exp'))}")

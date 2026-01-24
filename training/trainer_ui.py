@@ -98,7 +98,7 @@ class YoloTrainerUI(QMainWindow):
         
         # 添加模型版本选择
         self.model_version = QComboBox()
-        self.model_version.addItems(["YOLOv8", "YOLO11"])
+        self.model_version.addItems(["YOLOv8", "YOLO11", "YOLO26"])
         self.model_version.currentIndexChanged.connect(self.on_model_version_changed)
         data_layout.addRow("模型版本:", self.model_version)
         
@@ -205,9 +205,16 @@ class YoloTrainerUI(QMainWindow):
         if version == "YOLOv8":
             models = ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
             self.log_message("已切换到 YOLOv8 模型系列")
-        else:  # YOLO11
+        elif version == "YOLO11":
             models = ["yolo11n", "yolo11s", "yolo11m", "yolo11l", "yolo11x"]
             self.log_message("已切换到 YOLO11 模型系列")
+        elif version == "YOLO26":
+            models = ["yolo26n", "yolo26s", "yolo26m", "yolo26l", "yolo26x"]
+            self.log_message("已切换到 YOLO26 模型系列")
+        else:
+            # 默认使用YOLOv8
+            models = ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
+            self.log_message("使用默认 YOLOv8 模型系列")
         
         self.model_type.addItems(models)
         
@@ -351,8 +358,10 @@ class YoloTrainerUI(QMainWindow):
         advanced_layout.addRow("早停耐心值 (patience):", self.patience)
         
         self.workers = QSpinBox()
-        self.workers.setRange(1, 16)
-        self.workers.setValue(8)
+        # On Windows, workers>0 spawns subprocesses that re-import torch; this can trigger WinError 1455
+        # when the system pagefile is small. Allow 0 to disable multiprocessing dataloader.
+        self.workers.setRange(0, 16)
+        self.workers.setValue(0 if os.name == "nt" else 8)
         advanced_layout.addRow("数据加载线程数 (workers):", self.workers)
         
         self.device = QLineEdit("")
@@ -522,7 +531,9 @@ class YoloTrainerUI(QMainWindow):
             self.fliplr.setValue(self.settings.value("fliplr", 0.5, type=float))
             self.mosaic.setValue(self.settings.value("mosaic", 1.0, type=float))
             self.patience.setValue(self.settings.value("patience", 100, type=int))
-            self.workers.setValue(self.settings.value("workers", 8, type=int))
+            # On Windows, default to 0 to avoid multiprocessing DataLoader crashes
+            default_workers = 0 if os.name == "nt" else 8
+            self.workers.setValue(self.settings.value("workers", default_workers, type=int))
             self.device.setText(self.settings.value("device", ""))
             self.cos_lr.setChecked(self.settings.value("cos_lr", True, type=bool))
             self.cache.setChecked(self.settings.value("cache", False, type=bool))

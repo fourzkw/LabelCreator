@@ -28,6 +28,7 @@ DEFAULT_MODEL_PARAMS = {
     "iou_threshold": 0.45,
     "max_detections": 100,
     "enable_auto_predict": False,
+    "auto_label_include_labeled": True,
     "device": "cpu",
     "model_version": "yolov8",
     "model_format": "pt"
@@ -117,6 +118,7 @@ class Settings:
             "iou_threshold": float(self.qsettings.value("model/iou_threshold", 0.45)),
             "max_detections": int(self.qsettings.value("model/max_detections", 100)),
             "enable_auto_predict": self._to_bool(self.qsettings.value("model/enable_auto_predict", False)),
+            "auto_label_include_labeled": self._to_bool(self.qsettings.value("model/auto_label_include_labeled", True)),
             "device": self.qsettings.value("model/device", "cpu"),
             "model_version": self.qsettings.value("model/model_version", "yolov8"),
             "model_format": self.qsettings.value("model/model_format", "pt"),
@@ -143,6 +145,9 @@ class Settings:
         self.qsettings.setValue("model/iou_threshold", float(params.get("iou_threshold", 0.45)))
         self.qsettings.setValue("model/max_detections", int(params.get("max_detections", 100)))
         self.qsettings.setValue("model/enable_auto_predict", bool(params.get("enable_auto_predict", False)))
+        # 兼容旧调用方：如果没传该字段，则保留现有值不变
+        if "auto_label_include_labeled" in params:
+            self.qsettings.setValue("model/auto_label_include_labeled", bool(params.get("auto_label_include_labeled", True)))
         self.qsettings.setValue("model/device", params.get("device", "cpu"))
         self.qsettings.setValue("model/model_version", params.get("model_version", "yolov8"))
         self.qsettings.setValue("model/model_format", params.get("model_format", "pt"))

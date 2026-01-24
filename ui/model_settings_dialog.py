@@ -65,6 +65,11 @@ class ModelSettingsDialog(QDialog):
         self.version_group.addButton(self.yolov11_radio)
         version_layout.addWidget(self.yolov11_radio)
         
+        # YOLO26
+        self.yolo26_radio = QRadioButton("YOLO26")
+        self.version_group.addButton(self.yolo26_radio)
+        version_layout.addWidget(self.yolo26_radio)
+        
         # 设置默认选中的版本
         version = self.model_params.get("model_version", "yolov8")
         if version == "yolov5":
@@ -73,6 +78,8 @@ class ModelSettingsDialog(QDialog):
             self.yolov7_radio.setChecked(True)
         elif version == "yolov11":
             self.yolov11_radio.setChecked(True)
+        elif version == "yolo26":
+            self.yolo26_radio.setChecked(True)
         else:  # 默认 yolov8
             self.yolov8_radio.setChecked(True)
         
@@ -241,6 +248,8 @@ class ModelSettingsDialog(QDialog):
             self.yolov7_radio.setChecked(True)
         elif version == "yolov11":
             self.yolov11_radio.setChecked(True)
+        elif version == "yolo26":
+            self.yolo26_radio.setChecked(True)
         else:  # 默认 yolov8
             self.yolov8_radio.setChecked(True)
             
@@ -258,8 +267,12 @@ class ModelSettingsDialog(QDialog):
             return "yolov7"
         elif self.yolov8_radio.isChecked():
             return "yolov8"
-        else:
+        elif self.yolov11_radio.isChecked():
             return "yolov11"
+        elif self.yolo26_radio.isChecked():
+            return "yolo26"
+        else:
+            return "yolov8"  # 默认返回yolov8
     
     def get_model_format(self):
         """获取选择的模型格式"""

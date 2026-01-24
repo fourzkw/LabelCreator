@@ -4,10 +4,11 @@ class BoundingBox:
     """边界框类，用于存储和操作边界框数据"""
     
     def __init__(self, x1, y1, x2, y2, class_id, confidence=1.0):
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
+        # 规范化坐标：确保(x1, y1)在左上角，(x2, y2)在右下角
+        self.x1 = min(x1, x2)
+        self.y1 = min(y1, y2)
+        self.x2 = max(x1, x2)
+        self.y2 = max(y1, y2)
         self.class_id = class_id
         self.confidence = confidence
         self.keypoints = None  # 存储特征点数据
@@ -62,6 +63,13 @@ class BoundingBox:
         if abs(x - self.x2) <= margin and abs(y - self.y2) <= margin:
             return 'bottom-right'
         return None
+    
+    def normalize_coordinates(self):
+        """规范化坐标：确保(x1, y1)在左上角，(x2, y2)在右下角"""
+        if self.x1 > self.x2:
+            self.x1, self.x2 = self.x2, self.x1
+        if self.y1 > self.y2:
+            self.y1, self.y2 = self.y2, self.y1
     
     def set_keypoints(self, keypoints):
         """设置特征点数据"""

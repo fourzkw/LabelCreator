@@ -41,7 +41,8 @@
 
 **配置内容：**
 - 数据集路径
-- 模型选择（yolov8n/yolov8s/yolov11等）
+- 模型选择（YOLOv8、YOLO11、YOLO26等）
+- 模型大小（n/s/m/l/x）
 - 训练参数（轮数、批次大小等）
 - 优化器设置
 - 数据增强参数
@@ -154,9 +155,10 @@ A: 可以，但需要：
 
 ## 配置示例
 
-### 基础训练配置
+### 基础训练配置（YOLOv8）
 ```json
 {
+    "model_version": "YOLOv8",
     "model_type": "yolov8n",
     "pretrained": true,
     "epochs": 50,
@@ -165,9 +167,23 @@ A: 可以，但需要：
 }
 ```
 
+### YOLO26快速训练配置（推荐用于边缘设备）
+```json
+{
+    "model_version": "YOLO26",
+    "model_type": "yolo26n",
+    "model_category": "普通检测模型",
+    "pretrained": true,
+    "epochs": 100,
+    "batch_size": 16,
+    "img_size": 640
+}
+```
+
 ### 高精度训练配置
 ```json
 {
+    "model_version": "YOLOv8",
     "model_type": "yolov8l",
     "pretrained": true,
     "epochs": 300,
@@ -177,9 +193,23 @@ A: 可以，但需要：
 }
 ```
 
+### 姿态检测训练配置（YOLO26）
+```json
+{
+    "model_version": "YOLO26",
+    "model_type": "yolo26n",
+    "model_category": "yolo-pose模型",
+    "pretrained": true,
+    "epochs": 150,
+    "batch_size": 16,
+    "img_size": 640
+}
+```
+
 ### 从头训练配置
 ```json
 {
+    "model_version": "YOLOv8",
     "model_type": "yolov8n",
     "pretrained": false,
     "epochs": 300,

@@ -2,7 +2,7 @@ import os
 import traceback
 import logging
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QMessageBox
+from PyQt5.QtWidgets import QWidget, QMessageBox, QMenu, QAction
 from PyQt5.QtGui import QPainter, QPen, QColor, QPixmap, QCursor, QFont, QBrush
 from PyQt5.QtCore import Qt, QPoint
 
@@ -71,6 +71,9 @@ class ImageCanvas(QWidget):
         # 添加辅助线属性
         self.guide_lines_enabled = True  # 是否启用辅助线
         self.mouse_pos = None  # 当前鼠标位置
+        
+        # 添加剪贴板属性（用于复制/粘贴框）
+        self._clipboard_box = None  # 存储复制的框信息
     def load_image(self, image_path):
         """
         加载图像文件到画布
@@ -430,6 +433,11 @@ class ImageCanvas(QWidget):
         """处理鼠标按下事件"""
         if not self.pixmap:
             return
+        
+        # 右键按下处理上下文菜单
+        if event.button() == Qt.RightButton:
+            self.show_context_menu(event)
+            return
             
         # 中键按下处理图像拖动
         if event.button() == Qt.MiddleButton:
@@ -659,6 +667,9 @@ class ImageCanvas(QWidget):
             
             self.current_box.x2 = x
             self.current_box.y2 = y
+            
+            # 临时规范化坐标以便于绘制（不影响实际坐标的存储）
+            # normalize_coordinates会在鼠标释放时正式调用
             self.update()
     
     def mouseReleaseEvent(self, event):
@@ -744,6 +755,9 @@ class ImageCanvas(QWidget):
                     elif self.edit_handle == 'bottom':
                         box.y2 = max(box.y1 + 5, min(box.y2 + dy, img_height))
                 
+                # 规范化坐标（确保角点不会反向）
+                box.normalize_coordinates()
+                
                 # 完成编辑后清除编辑状态
                 self.edit_mode = None
                 self.edit_handle = None
@@ -765,6 +779,8 @@ class ImageCanvas(QWidget):
                 
                 box_added = False
                 if width > 5 and height > 5:  # 最小尺寸阈值
+                    # 规范化坐标（确保角点不会反向）
+                    self.current_box.normalize_coordinates()
                     self.boxes.append(self.current_box)
                     self.parent.update_box_list()
                     box_added = True
@@ -830,3 +846,127 @@ class ImageCanvas(QWidget):
             
         # 更新画布
         self.update()
+    
+    def show_context_menu(self, event):
+        """显示右键菜单"""
+        if not self.pixmap or self.keypoint_edit_mode:
+            return
+        
+        # 获取图像坐标
+        x, y = self.get_image_position(event.pos())
+        if x is None or y is None:
+            return
+        
+        # 检查是否点击了某个边界框
+        box_index, _, _ = self.get_box_at_position(x, y)
+        
+        if box_index < 0:
+            return  # 没有点击任何框
+        
+        # 创建上下文菜单
+        menu = QMenu(self)
+        
+        # 获取当前框的信息
+        box = self.boxes[box_index]
+        current_class_id = box.class_id
+        current_class_name = self.parent.get_class_name(current_class_id)
+        
+        # 添加"修改类别"子菜单
+        change_class_menu = menu.addMenu(tr("修改类别"))
+        for class_id, class_name in enumerate(self.parent.classes):
+            action = QAction(f"{class_name} (ID: {class_id})", self)
+            action.setCheckable(True)
+            action.setChecked(class_id == current_class_id)
+            # 使用lambda捕获box_index和class_id
+            action.triggered.connect(lambda checked, idx=box_index, cid=class_id: self.change_box_class(idx, cid))
+            change_class_menu.addAction(action)
+        
+        # 添加分隔线
+        menu.addSeparator()
+        
+        # 添加"删除框"操作
+        delete_action = QAction(tr("删除框"), self)
+        delete_action.triggered.connect(lambda: self.delete_box_by_index(box_index))
+        menu.addAction(delete_action)
+        
+        # 添加"复制框"操作
+        copy_action = QAction(tr("复制框"), self)
+        copy_action.triggered.connect(lambda: self.copy_box_to_clipboard(box_index))
+        menu.addAction(copy_action)
+        
+        # 显示菜单
+        menu.exec_(event.globalPos())
+    
+    def change_box_class(self, box_index, class_id):
+        """修改边界框的类别"""
+        if box_index < 0 or box_index >= len(self.boxes):
+            return
+        
+        box = self.boxes[box_index]
+        old_class_id = box.class_id
+        box.class_id = class_id
+        
+        # 更新选择和列表
+        self.selected_box_index = box_index
+        self.parent.box_list.setCurrentRow(box_index)
+        self.parent.update_box_list()
+        
+        # 保存修改
+        self.parent.save_current()
+        
+        # 重绘
+        self.update()
+        
+        # 记录日志
+        old_class_name = self.parent.get_class_name(old_class_id)
+        new_class_name = self.parent.get_class_name(class_id)
+        logger.info(f"修改框的类别：{old_class_name} -> {new_class_name}")
+    
+    def delete_box_by_index(self, box_index):
+        """删除指定索引的边界框"""
+        if box_index < 0 or box_index >= len(self.boxes):
+            return
+        
+        # 确认删除
+        class_name = self.parent.get_class_name(self.boxes[box_index].class_id)
+        reply = QMessageBox.question(
+            self,
+            tr("删除框"),
+            tr(f"确定要删除 {class_name} 的边界框吗？"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            del self.boxes[box_index]
+            self.selected_box_index = -1
+            self.parent.update_box_list()
+            self.parent.save_current()
+            self.update()
+            logger.info(f"删除了编号为 {box_index} 的边界框")
+    
+    def copy_box_to_clipboard(self, box_index):
+        """复制边界框（后续可粘贴到其他位置）"""
+        if box_index < 0 or box_index >= len(self.boxes):
+            return
+        
+        # 存储要复制的框的信息
+        self._clipboard_box = {
+            'x1': self.boxes[box_index].x1,
+            'y1': self.boxes[box_index].y1,
+            'x2': self.boxes[box_index].x2,
+            'y2': self.boxes[box_index].y2,
+            'class_id': self.boxes[box_index].class_id,
+            'confidence': self.boxes[box_index].confidence,
+        }
+        
+        class_name = self.parent.get_class_name(self.boxes[box_index].class_id)
+        logger.info(f"已复制 {class_name} 的边界框到剪贴板")
+        
+        # 显示提示信息
+        QMessageBox.information(
+            self,
+            tr("复制成功"),
+            tr(f"已复制 {class_name} 的边界框\n提示：此功能目前已记录到内存，可用于后续扩展"),
+            QMessageBox.Ok
+        )

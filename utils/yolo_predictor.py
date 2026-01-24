@@ -21,7 +21,7 @@ class YOLOPredictor:
     YOLO模型预测器类
     
     用于加载YOLO模型并对图像进行目标检测预测。
-    支持YOLOv8和ONNX格式的模型。
+    支持YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26和ONNX格式的模型。
     """
     
     def __init__(self):
@@ -30,7 +30,8 @@ class YOLOPredictor:
         self.iou_threshold = 0.45
         self.max_detections = 100
         self.device = "cpu"  # 默认使用CPU
-        self.model_type = None  # 'yolov8', 'onnx'
+        self.model_type = None  # 'ultralytics', 'onnx'
+        self.model_version = "yolov8"  # 模型版本: 'yolov5', 'yolov7', 'yolov8', 'yolov11', 'yolo26'
         self.keypoints_number = 0  # 特征点数量，0表示使用模型默认值
         
         # 检测可用设备
@@ -41,7 +42,7 @@ class YOLOPredictor:
         else:
             logger.info(f"CUDA不可用，使用设备: cpu")
     
-    def set_params(self, conf_threshold=None, iou_threshold=None, max_detections=None, device=None, keypoints_number=None):
+    def set_params(self, conf_threshold=None, iou_threshold=None, max_detections=None, device=None, keypoints_number=None, model_version=None):
         """设置预测参数"""
         if conf_threshold is not None:
             self.conf_threshold = conf_threshold
@@ -61,15 +62,31 @@ class YOLOPredictor:
         if keypoints_number is not None:
             self.keypoints_number = keypoints_number
             logger.info(f"设置特征点数量: {self.keypoints_number}")
+        if model_version is not None:
+            self.model_version = model_version
+            logger.info(f"设置模型版本: {self.model_version}")
     
-    def load_model(self, model_path):
-        """加载YOLO模型"""
+    def load_model(self, model_path, model_version=None):
+        """
+        加载YOLO模型
+        
+        Args:
+            model_path (str): 模型文件路径
+            model_version (str): 模型版本 ('yolov5', 'yolov7', 'yolov8', 'yolov11', 'yolo26')
+            
+        Returns:
+            bool: 加载是否成功
+        """
         if not os.path.exists(model_path):
             logger.error(f"模型文件不存在: {model_path}")
             return False
         
+        # 更新模型版本
+        if model_version is not None:
+            self.model_version = model_version
+        
         try:
-            logger.info(f"正在加载YOLO模型: {model_path}")
+            logger.info(f"正在加载YOLO模型: {model_path} (版本: {self.model_version})")
             
             # 根据文件扩展名确定模型类型
             file_ext = os.path.splitext(model_path)[1].lower()
@@ -88,17 +105,27 @@ class YOLOPredictor:
                 logger.info(f"ONNX模型加载成功，使用提供程序: {providers}")
                 return True
                 
-            # YOLOv8 模型 (使用 ultralytics 包)
+            # Ultralytics YOLO 模型 (支持 YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26)
             elif ULTRALYTICS_AVAILABLE:
                 self.model = YOLO(model_path)
-                self.model_type = 'yolov8'
-                logger.info("YOLOv8模型加载成功")
+                self.model_type = 'ultralytics'
+                logger.info(f"{self.model_version.upper()} 模型加载成功")
+                
+                # 将模型移动到指定设备
+                if self.device != 'cpu':
+                    try:
+                        self.model.to(self.device)
+                        logger.info(f"模型已移动到设备: {self.device}")
+                    except Exception as e:
+                        logger.warning(f"无法将模型移动到 {self.device}，使用CPU: {str(e)}")
+                        self.device = 'cpu'
+                
                 return True
                 
             # 不支持的模型类型
             else:
                 logger.error("不支持的模型类型或缺少必要依赖")
-                logger.error("请使用 ONNX 格式或安装 ultralytics 包使用 YOLOv8")
+                logger.error("请使用 ONNX 格式或安装 ultralytics 包")
                 return False
                 
         except Exception as e:
@@ -125,13 +152,13 @@ class YOLOPredictor:
             return []
         
         try:
-            logger.info(f"对图像进行预测: {image_path}")
+            logger.info(f"使用 {self.model_version.upper()} 模型对图像进行预测: {image_path}")
             
             # 根据模型类型选择不同的预测方法
             if self.model_type == 'onnx':
                 return self._predict_onnx(image_path)
-            elif self.model_type == 'yolov8':
-                return self._predict_yolov8(image_path)
+            elif self.model_type == 'ultralytics':
+                return self._predict_ultralytics(image_path)
             else:
                 logger.error(f"不支持的模型类型: {self.model_type}")
                 return []
@@ -141,21 +168,27 @@ class YOLOPredictor:
             logger.error(f"异常详情: {traceback.format_exc()}")
             return []
     
-    def _predict_yolov8(self, image_path):
-        """使用YOLOv8模型预测"""
+    def _predict_ultralytics(self, image_path):
+        """
+        使用 Ultralytics YOLO 模型预测
+        支持 YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26
+        """
         # 设置参数
         predict_args = {
             "source": image_path,
             "conf": self.conf_threshold,
             "iou": self.iou_threshold,
             "max_det": self.max_detections,
-            "device": self.device
+            "device": self.device,
+            "verbose": False  # 减少输出日志
         }
         
         # 如果设置了特征点数量且大于0，则添加到预测参数中
         if self.keypoints_number > 0:
             predict_args["kpt_num"] = self.keypoints_number
             
+        logger.info(f"预测参数: conf={self.conf_threshold}, iou={self.iou_threshold}, max_det={self.max_detections}, device={self.device}")
+        
         results = self.model.predict(**predict_args)
         
         # 提取预测结果
@@ -163,6 +196,8 @@ class YOLOPredictor:
         if len(results) > 0:
             result = results[0]
             boxes = result.boxes
+            
+            logger.info(f"检测到 {len(boxes)} 个目标")
             
             for i in range(len(boxes)):
                 box = boxes[i]
@@ -191,11 +226,13 @@ class YOLOPredictor:
                             keypoints_xy = keypoints[:, :2]
                             # 设置边界框的关键点
                             bbox.set_keypoints(keypoints_xy)
-                            logger.info(f"检测到 {len(keypoints_xy)} 个特征点")
+                            logger.debug(f"边界框 {i} 包含 {len(keypoints_xy)} 个特征点")
                     except Exception as e:
                         logger.error(f"提取特征点时出错: {str(e)}")
                 
                 predictions.append(bbox)
+        else:
+            logger.info("未检测到任何目标")
         
         return predictions
     
