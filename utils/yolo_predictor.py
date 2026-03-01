@@ -14,6 +14,13 @@ try:
 except ImportError:
     ULTRALYTICS_AVAILABLE = False
 
+# 导入TensorRT路径设置函数
+try:
+    from utils.model_converter.tensorrt_converter import TensorRTConverter
+    TENSORRT_CONVERTER_AVAILABLE = True
+except ImportError:
+    TENSORRT_CONVERTER_AVAILABLE = False
+
 logger = logging.getLogger('YOLOLabelCreator.YOLOPredictor')
 
 class YOLOPredictor:
@@ -21,7 +28,7 @@ class YOLOPredictor:
     YOLO模型预测器类
     
     用于加载YOLO模型并对图像进行目标检测预测。
-    支持YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26和ONNX格式的模型。
+    支持YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26、ONNX和TensorRT格式的模型。
     """
     
     def __init__(self):
@@ -30,9 +37,10 @@ class YOLOPredictor:
         self.iou_threshold = 0.45
         self.max_detections = 100
         self.device = "cpu"  # 默认使用CPU
-        self.model_type = None  # 'ultralytics', 'onnx'
+        self.model_type = None  # 'ultralytics', 'onnx', 'tensorrt'
         self.model_version = "yolov8"  # 模型版本: 'yolov5', 'yolov7', 'yolov8', 'yolov11', 'yolo26'
         self.keypoints_number = 0  # 特征点数量，0表示使用模型默认值
+        self.class_mapping = {}  # 标注映射：{识别类别ID: 标注类别ID}
         
         # 检测可用设备
         self.available_devices = ["cpu"]
@@ -42,7 +50,7 @@ class YOLOPredictor:
         else:
             logger.info(f"CUDA不可用，使用设备: cpu")
     
-    def set_params(self, conf_threshold=None, iou_threshold=None, max_detections=None, device=None, keypoints_number=None, model_version=None):
+    def set_params(self, conf_threshold=None, iou_threshold=None, max_detections=None, device=None, keypoints_number=None, model_version=None, class_mapping=None):
         """设置预测参数"""
         if conf_threshold is not None:
             self.conf_threshold = conf_threshold
@@ -65,6 +73,9 @@ class YOLOPredictor:
         if model_version is not None:
             self.model_version = model_version
             logger.info(f"设置模型版本: {self.model_version}")
+        if class_mapping is not None:
+            self.class_mapping = class_mapping
+            logger.info(f"设置标注映射: {class_mapping}")
     
     def load_model(self, model_path, model_version=None):
         """
@@ -104,6 +115,46 @@ class YOLOPredictor:
                 self.model_type = 'onnx'
                 logger.info(f"ONNX模型加载成功，使用提供程序: {providers}")
                 return True
+            
+            # TensorRT 模型 (.engine)
+            elif file_ext == '.engine':
+                if not ULTRALYTICS_AVAILABLE:
+                    logger.error("加载TensorRT模型需要ultralytics包")
+                    return False
+                
+                # 检查CUDA是否可用（TensorRT需要CUDA）
+                if not torch.cuda.is_available():
+                    logger.error("TensorRT模型需要CUDA支持，但CUDA不可用")
+                    return False
+                
+                # 在加载TensorRT模型之前，先设置TensorRT的PATH
+                # 这很重要，因为GUI应用可能没有TensorRT在PATH中
+                if TENSORRT_CONVERTER_AVAILABLE:
+                    TensorRTConverter._add_tensorrt_to_path()
+                
+                # ultralytics YOLO可以直接加载TensorRT引擎文件
+                try:
+                    self.model = YOLO(model_path)
+                    self.model_type = 'tensorrt'
+                    logger.info(f"TensorRT模型加载成功: {model_path}")
+                    
+                    # TensorRT模型必须在CUDA设备上运行
+                    if self.device != 'cuda':
+                        logger.warning("TensorRT模型需要CUDA设备，自动切换到cuda")
+                        self.device = 'cuda'
+                    
+                    # 将模型移动到CUDA设备
+                    try:
+                        self.model.to(self.device)
+                        logger.info(f"TensorRT模型已移动到设备: {self.device}")
+                    except Exception as e:
+                        logger.warning(f"无法将TensorRT模型移动到 {self.device}: {str(e)}")
+                    
+                    return True
+                except Exception as e:
+                    logger.error(f"加载TensorRT模型失败: {str(e)}")
+                    logger.error(f"异常详情: {traceback.format_exc()}")
+                    return False
                 
             # Ultralytics YOLO 模型 (支持 YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26)
             elif ULTRALYTICS_AVAILABLE:
@@ -125,7 +176,8 @@ class YOLOPredictor:
             # 不支持的模型类型
             else:
                 logger.error("不支持的模型类型或缺少必要依赖")
-                logger.error("请使用 ONNX 格式或安装 ultralytics 包")
+                logger.error("支持的格式: .pt, .pth (PyTorch), .onnx (ONNX), .engine (TensorRT)")
+                logger.error("请安装 ultralytics 包以支持PyTorch和TensorRT格式")
                 return False
                 
         except Exception as e:
@@ -157,7 +209,8 @@ class YOLOPredictor:
             # 根据模型类型选择不同的预测方法
             if self.model_type == 'onnx':
                 return self._predict_onnx(image_path)
-            elif self.model_type == 'ultralytics':
+            elif self.model_type == 'ultralytics' or self.model_type == 'tensorrt':
+                # TensorRT模型使用与ultralytics相同的预测接口
                 return self._predict_ultralytics(image_path)
             else:
                 logger.error(f"不支持的模型类型: {self.model_type}")
@@ -173,6 +226,10 @@ class YOLOPredictor:
         使用 Ultralytics YOLO 模型预测
         支持 YOLOv5、YOLOv7、YOLOv8、YOLO11、YOLO26
         """
+        # 如果是TensorRT模型，确保PATH已设置（以防万一）
+        if self.model_type == 'tensorrt' and TENSORRT_CONVERTER_AVAILABLE:
+            TensorRTConverter._add_tensorrt_to_path()
+        
         # 设置参数
         predict_args = {
             "source": image_path,
@@ -205,13 +262,17 @@ class YOLOPredictor:
                 conf = box.conf[0].cpu().numpy()
                 cls = box.cls[0].cpu().numpy()
                 
+                # 应用标注映射
+                original_class_id = int(cls)
+                mapped_class_id = self.class_mapping.get(original_class_id, original_class_id)
+                
                 # 创建边界框对象
                 bbox = BoundingBox(
                     x1=float(x1),
                     y1=float(y1),
                     x2=float(x2),
                     y2=float(y2),
-                    class_id=int(cls),
+                    class_id=mapped_class_id,
                     confidence=float(conf)
                 )
                 
@@ -269,7 +330,10 @@ class YOLOPredictor:
             
             for detection in valid_detections:
                 x1, y1, x2, y2, conf = detection[:5]
-                cls_id = int(detection[5])
+                original_cls_id = int(detection[5])
+                
+                # 应用标注映射
+                mapped_cls_id = self.class_mapping.get(original_cls_id, original_cls_id)
                 
                 # 将坐标转换为原始图像尺寸
                 x1 = float(x1 * img_width)
@@ -283,7 +347,7 @@ class YOLOPredictor:
                     'x2': x2,
                     'y2': y2,
                     'confidence': float(conf),
-                    'class_id': cls_id
+                    'class_id': mapped_cls_id
                 })
         
         return predictions

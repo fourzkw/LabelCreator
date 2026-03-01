@@ -12,3 +12,12 @@ onnxruntime-gpu==1.19.2
 
 # YOLO模型训练相关依赖
 ultralytics>=8.4.7
+
+# TensorRT 转换相关依赖（可选，仅在使用 TensorRT 转换时需要）
+# 注意：TensorRT 转换还需要以下系统级依赖：
+# 1. NVIDIA GPU 和驱动
+# 2. CUDA Toolkit (11.0+，推荐 11.8+)
+# 3. TensorRT 库 (8.0+，推荐 8.5+)
+# 详细安装说明请参考：utils/model_converter/TENSORRT_REQUIREMENTS.md
+# nvidia-tensorrt  # 可选：通过 pip 安装 TensorRT Python 绑定
+# 或者从 NVIDIA 官网下载 TensorRT 安装包进行系统级安装

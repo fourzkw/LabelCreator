@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, 
                             QGroupBox, QLabel, QComboBox, QLineEdit, 
                             QPushButton, QFileDialog, QDoubleSpinBox, 
-                            QSpinBox, QCheckBox, QRadioButton, QButtonGroup)
+                            QSpinBox, QCheckBox, QRadioButton, QButtonGroup,
+                            QTableWidget, QTableWidgetItem, QHeaderView)
 from PyQt5.QtCore import Qt
 import os
 import logging
@@ -176,6 +177,55 @@ class ModelSettingsDialog(QDialog):
         
         params_group.setLayout(params_layout)
         
+        # 标注映射设置
+        mapping_group = QGroupBox(tr("标注映射"))
+        mapping_layout = QVBoxLayout()
+        
+        mapping_info_label = QLabel(tr("设置识别类别ID到标注类别ID的映射（留空表示不映射，使用原类别ID）"))
+        mapping_info_label.setWordWrap(True)
+        mapping_info_label.setStyleSheet("color: #666; font-size: 9pt;")
+        mapping_layout.addWidget(mapping_info_label)
+        
+        # 创建表格
+        self.mapping_table = QTableWidget(0, 2)
+        self.mapping_table.setHorizontalHeaderLabels([tr("识别类别ID"), tr("标注类别ID")])
+        self.mapping_table.horizontalHeader().setStretchLastSection(True)
+        self.mapping_table.setMinimumHeight(150)
+        self.mapping_table.setMaximumHeight(200)
+        
+        # 设置列宽
+        header = self.mapping_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        
+        # 加载现有的映射
+        class_mapping = self.model_params.get("class_mapping", {})
+        if class_mapping:
+            self.mapping_table.setRowCount(len(class_mapping))
+            for row, (detected_id, label_id) in enumerate(sorted(class_mapping.items())):
+                detected_item = QTableWidgetItem(str(detected_id))
+                detected_item.setTextAlignment(Qt.AlignCenter)
+                self.mapping_table.setItem(row, 0, detected_item)
+                
+                label_item = QTableWidgetItem(str(label_id))
+                label_item.setTextAlignment(Qt.AlignCenter)
+                self.mapping_table.setItem(row, 1, label_item)
+        
+        mapping_layout.addWidget(self.mapping_table)
+        
+        # 添加/删除按钮
+        mapping_btn_layout = QHBoxLayout()
+        self.add_mapping_btn = QPushButton(tr("添加映射"))
+        self.add_mapping_btn.clicked.connect(self.add_mapping_row)
+        self.remove_mapping_btn = QPushButton(tr("删除选中"))
+        self.remove_mapping_btn.clicked.connect(self.remove_mapping_row)
+        mapping_btn_layout.addWidget(self.add_mapping_btn)
+        mapping_btn_layout.addWidget(self.remove_mapping_btn)
+        mapping_btn_layout.addStretch()
+        mapping_layout.addLayout(mapping_btn_layout)
+        
+        mapping_group.setLayout(mapping_layout)
+        
         # 按钮
         btn_layout = QHBoxLayout()
         self.reset_btn = QPushButton(tr("重置为默认值"))
@@ -196,6 +246,7 @@ class ModelSettingsDialog(QDialog):
         # 添加到主布局
         layout.addWidget(model_group)
         layout.addWidget(params_group)
+        layout.addWidget(mapping_group)
         layout.addLayout(btn_layout)
     
     def browse_model(self):
@@ -258,6 +309,9 @@ class ModelSettingsDialog(QDialog):
             self.onnx_radio.setChecked(True)
         else:  # 默认 pt
             self.pt_radio.setChecked(True)
+        
+        # 重置标注映射
+        self.mapping_table.setRowCount(0)
     
     def get_model_version(self):
         """获取选择的模型版本"""
@@ -282,8 +336,42 @@ class ModelSettingsDialog(QDialog):
         """保存参数设置"""
         self.accept()  # 先接受对话框，返回Accepted结果
         
+    def add_mapping_row(self):
+        """添加一行标注映射"""
+        row = self.mapping_table.rowCount()
+        self.mapping_table.insertRow(row)
+        
+        detected_item = QTableWidgetItem("0")
+        detected_item.setTextAlignment(Qt.AlignCenter)
+        self.mapping_table.setItem(row, 0, detected_item)
+        
+        label_item = QTableWidgetItem("0")
+        label_item.setTextAlignment(Qt.AlignCenter)
+        self.mapping_table.setItem(row, 1, label_item)
+    
+    def remove_mapping_row(self):
+        """删除选中的标注映射行"""
+        current_row = self.mapping_table.currentRow()
+        if current_row >= 0:
+            self.mapping_table.removeRow(current_row)
+    
     def get_updated_params(self):
         """获取用户更新后的参数"""
+        # 读取标注映射
+        class_mapping = {}
+        for row in range(self.mapping_table.rowCount()):
+            detected_item = self.mapping_table.item(row, 0)
+            label_item = self.mapping_table.item(row, 1)
+            if detected_item and label_item:
+                try:
+                    detected_id = int(detected_item.text())
+                    label_text = label_item.text().strip()
+                    if label_text:  # 如果标注类别ID不为空
+                        label_id = int(label_text)
+                        class_mapping[detected_id] = label_id
+                except ValueError:
+                    continue  # 跳过无效的行
+        
         return {
             "model_path": self.model_path_edit.text(),
             "confidence_threshold": self.conf_threshold.value(),
@@ -293,5 +381,6 @@ class ModelSettingsDialog(QDialog):
             "device": self.device_combo.currentText(),
             "model_version": self.get_model_version(),
             "model_format": self.get_model_format(),
-            "keypoints_number": self.keypoints_spinbox.value()
+            "keypoints_number": self.keypoints_spinbox.value(),
+            "class_mapping": class_mapping
         }

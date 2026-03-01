@@ -31,7 +31,8 @@ DEFAULT_MODEL_PARAMS = {
     "auto_label_include_labeled": True,
     "device": "cpu",
     "model_version": "yolov8",
-    "model_format": "pt"
+    "model_format": "pt",
+    "class_mapping": {}  # 标注映射：{识别类别ID: 标注类别ID}
 }
 
 class Settings:
@@ -112,6 +113,18 @@ class Settings:
     # 整合自Config类的方法
     def get_model_params(self):
         """获取模型参数"""
+        # 读取标注映射
+        class_mapping_str = self.qsettings.value("model/class_mapping", "")
+        class_mapping = {}
+        if class_mapping_str:
+            try:
+                class_mapping = json.loads(class_mapping_str)
+                # 确保键和值都是整数
+                class_mapping = {int(k): int(v) for k, v in class_mapping.items()}
+            except Exception as e:
+                logger.warning(f"解析标注映射失败: {str(e)}")
+                class_mapping = {}
+        
         params = {
             "model_path": self.qsettings.value("model/model_path", ""),
             "confidence_threshold": float(self.qsettings.value("model/confidence_threshold", 0.5)),
@@ -122,7 +135,8 @@ class Settings:
             "device": self.qsettings.value("model/device", "cpu"),
             "model_version": self.qsettings.value("model/model_version", "yolov8"),
             "model_format": self.qsettings.value("model/model_format", "pt"),
-            "keypoints_number": int(self.qsettings.value("model/keypoints_number", 0))
+            "keypoints_number": int(self.qsettings.value("model/keypoints_number", 0)),
+            "class_mapping": class_mapping
         }
         return params
     
@@ -152,6 +166,12 @@ class Settings:
         self.qsettings.setValue("model/model_version", params.get("model_version", "yolov8"))
         self.qsettings.setValue("model/model_format", params.get("model_format", "pt"))
         self.qsettings.setValue("model/keypoints_number", int(params.get("keypoints_number", 0)))
+        # 保存标注映射
+        class_mapping = params.get("class_mapping", {})
+        if isinstance(class_mapping, dict):
+            # 确保键和值都是整数
+            class_mapping = {int(k): int(v) for k, v in class_mapping.items()}
+            self.qsettings.setValue("model/class_mapping", json.dumps(class_mapping))
         self.qsettings.sync()
         return True
     

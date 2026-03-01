@@ -25,6 +25,7 @@ from ui.dataset_split_dialog import DatasetSplitDialog
 from ui.class_manager_dialog import ClassManagerDialog
 from ui.model_converter_dialog import ModelConverterDialog
 from ui.model_inspector_dialog import ModelInspectorDialog
+from ui.model_test_dialog import ModelTestDialog
 
 # 获取日志记录器
 logger = logging.getLogger('YOLOLabelCreator.MainWindow')
@@ -50,6 +51,9 @@ class YOLOLabelCreator(QMainWindow):
         app_dir = QDir.currentPath()
         self.settings = Settings(app_dir)
         
+        # 加载并设置模型参数
+        self._load_model_params()
+        
         # 应用样式表
         self.apply_stylesheet()
         
@@ -57,6 +61,29 @@ class YOLOLabelCreator(QMainWindow):
         
         # 设置快捷键
         self.setup_shortcuts()
+    
+    def _load_model_params(self):
+        """加载模型参数并设置到预测器"""
+        model_params = self.settings.get_model_params()
+        
+        # 设置预测器参数
+        self.yolo_predictor.set_params(
+            conf_threshold=model_params.get('confidence_threshold', 0.5),
+            iou_threshold=model_params.get('iou_threshold', 0.45),
+            max_detections=model_params.get('max_detections', 100),
+            device=model_params.get('device', 'cpu'),
+            model_version=model_params.get('model_version', 'yolov8'),
+            class_mapping=model_params.get('class_mapping', {})
+        )
+        
+        # 如果存在模型路径，尝试加载模型
+        model_path = model_params.get('model_path', '')
+        if model_path and os.path.exists(model_path):
+            model_version = model_params.get('model_version', 'yolov8')
+            if self.yolo_predictor.load_model(model_path, model_version):
+                self.model_path = model_path
+                logger.info(f"启动时加载模型: {model_path}")
+                # 注意：此时UI还未初始化，按钮和标签会在init_ui之后更新
     
     def apply_stylesheet(self):
         """应用全局样式表"""
@@ -359,6 +386,15 @@ class YOLOLabelCreator(QMainWindow):
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
         
+        # 更新模型标签和按钮状态（如果已加载模型）
+        if self.model_path:
+            model_params = self.settings.get_model_params()
+            model_name = os.path.basename(self.model_path)
+            model_version = model_params.get('model_version', 'yolov8')
+            self.model_label.setText(tr(f"已加载: {model_name} ({model_version.upper()})"))
+            self.auto_label_button.setEnabled(True)
+            self.auto_label_all_button.setEnabled(True)
+        
         # Create menu bar with icons
         menubar = self.menuBar()
         file_menu = menubar.addMenu(tr("File"))
@@ -420,7 +456,7 @@ class YOLOLabelCreator(QMainWindow):
         tools_menu.addAction(dataset_split_action)
         
         # 添加模型转换菜单项
-        model_converter_action = QAction(tr("PT模型转ONNX"), self)
+        model_converter_action = QAction(tr("PT模型转换器"), self)
         model_converter_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogContentsView))
         model_converter_action.triggered.connect(self.open_model_converter)
         tools_menu.addAction(model_converter_action)
@@ -430,6 +466,12 @@ class YOLOLabelCreator(QMainWindow):
         model_inspector_action.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
         model_inspector_action.triggered.connect(self.open_model_inspector)
         tools_menu.addAction(model_inspector_action)
+
+        # 添加模型测试菜单项
+        model_test_action = QAction(tr("模型测试"), self)
+        model_test_action.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        model_test_action.triggered.connect(self.open_model_test)
+        tools_menu.addAction(model_test_action)
         
         # 添加训练菜单
         train_menu = menubar.addMenu(tr("训练"))
@@ -1118,8 +1160,11 @@ class YOLOLabelCreator(QMainWindow):
             return
             
         if not hasattr(self, 'model_path') or not self.model_path or not os.path.exists(self.model_path):
-            QMessageBox.warning(self, tr("警告"), tr("请先选择有效的模型文件"))
-            return
+            # 如果没有模型，打开模型设置对话框
+            self.open_model_settings()
+            # 检查设置后是否加载了模型
+            if not hasattr(self, 'model_path') or not self.model_path or not os.path.exists(self.model_path):
+                return
         
         try:
             # 显示进度对话框
@@ -1175,8 +1220,11 @@ class YOLOLabelCreator(QMainWindow):
             return
             
         if not hasattr(self, 'model_path') or not self.model_path or not os.path.exists(self.model_path):
-            QMessageBox.warning(self, tr("警告"), tr("请先选择有效的模型文件"))
-            return
+            # 如果没有模型，打开模型设置对话框
+            self.open_model_settings()
+            # 检查设置后是否加载了模型
+            if not hasattr(self, 'model_path') or not self.model_path or not os.path.exists(self.model_path):
+                return
         
         try:
             # 创建进度对话框
@@ -1427,7 +1475,8 @@ class YOLOLabelCreator(QMainWindow):
                     iou_threshold=new_params['iou_threshold'],
                     max_detections=new_params['max_detections'],
                     device=new_params['device'],
-                    model_version=new_params.get('model_version', 'yolov8')
+                    model_version=new_params.get('model_version', 'yolov8'),
+                    class_mapping=new_params.get('class_mapping', {})
                 )
                 
                 # 如果选择了新模型，加载它
@@ -1571,6 +1620,16 @@ class YOLOLabelCreator(QMainWindow):
             logger.error(f"打开模型结构查看器失败: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             QMessageBox.warning(self, tr("错误"), f"{tr('打开模型结构查看器失败')}: {str(e)}")
+
+    def open_model_test(self):
+        """打开模型测试对话框"""
+        try:
+            dlg = ModelTestDialog(self)
+            dlg.exec_()
+        except Exception as e:
+            logger.error(f"打开模型测试对话框失败: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            QMessageBox.warning(self, tr("错误"), tr(f"打开模型测试对话框失败: {str(e)}"))
             
     def reload_all_labels_and_update_config(self):
         """

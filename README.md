@@ -606,6 +606,12 @@ pip install onnx==1.19.0 onnxruntime==1.19.2
 
 ## 更新日志 (Changelog)
 
+### v3.0.0
+- 添加模型性能测试功能，可单独测试和批量列表顺序测试
+- 添加pt模型转TensorRT模型格式功能
+
+### v2.4.0
+
 ### v2.3.0 (2025.11.02)
 - 优化项目结构，配置文件统一管理
 - 新增 `config/`、`pretrained_models/`、`trained_models/` 目录
